@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Situation Search</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#141922; --panel2:#1b2230; --line:#252d3b;
+    --txt:#e6ebf2; --muted:#8b97a8;
+    --accent:#5b8cff; --good:#3ecf8e; --warn:#f0a742; --hot:#ff6b6b;
+    --blue:#5b8cff; --purple:#b78bff; --gold:#f5c451;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  a{color:var(--accent)}
+  header{padding:16px 22px;border-bottom:1px solid var(--line);
+    display:flex;align-items:baseline;gap:14px;background:var(--panel)}
+  header h1{margin:0;font-size:17px;letter-spacing:.2px}
+  header .tag{font-size:11px;color:var(--muted);border:1px solid var(--line);
+    padding:2px 8px;border-radius:20px}
+  header .ctx{margin-left:auto;font-size:12px;color:var(--muted)}
+  .wrap{display:grid;grid-template-columns:minmax(420px,1fr) minmax(420px,1fr);
+    gap:18px;padding:18px;max-width:1400px;margin:0 auto}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px}
+  .left{position:sticky;top:18px;align-self:start}
+  video{width:100%;border-radius:12px 12px 0 0;display:block;background:#000}
+  .nowbar{padding:12px 14px;display:flex;gap:10px;align-items:center;
+    border-top:1px solid var(--line);flex-wrap:wrap}
+  .nowbar .tc{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px}
+  .nowprose{padding:0 14px 14px;color:var(--muted);font-size:13px;min-height:20px}
+  .timeline{padding:12px 14px;border-top:1px solid var(--line)}
+  .timeline .lbl{font-size:11px;color:var(--muted);margin-bottom:8px;
+    text-transform:uppercase;letter-spacing:.6px}
+  .ticks{display:flex;gap:2px;height:34px;align-items:stretch}
+  .tick{flex:1;border-radius:3px;opacity:.55;cursor:pointer;transition:.12s;
+    min-width:3px}
+  .tick:hover{opacity:1;transform:scaleY(1.12)}
+  .tick.active{opacity:1;outline:2px solid #fff}
+  .searchbox{padding:16px}
+  .searchbox input[type=text]{width:100%;padding:13px 15px;font-size:15px;
+    background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    color:var(--txt);outline:none}
+  .searchbox input:focus{border-color:var(--accent)}
+  .examples{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
+  .chip{font-size:12px;padding:6px 11px;border-radius:20px;cursor:pointer;
+    background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
+  .chip:hover{color:var(--txt);border-color:var(--accent)}
+  .filters{display:flex;gap:9px;margin-top:12px;flex-wrap:wrap}
+  select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    padding:8px 10px;border-radius:8px;font-size:12px}
+  .meta{display:flex;align-items:center;gap:8px;padding:2px 18px 10px;
+    color:var(--muted);font-size:12px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--good)}
+  .dot.kw{background:var(--warn)}
+  .results{padding:4px 12px 18px;display:flex;flex-direction:column;gap:10px;
+    max-height:70vh;overflow:auto}
+  .res{display:grid;grid-template-columns:132px 1fr;gap:12px;padding:10px;
+    border:1px solid var(--line);border-radius:10px;cursor:pointer;
+    background:var(--panel);transition:.12s}
+  .res:hover{border-color:var(--accent);background:var(--panel2)}
+  .res.active{border-color:#fff}
+  .res img{width:132px;height:74px;object-fit:cover;border-radius:7px;background:#000}
+  .res .body{min-width:0}
+  .res .top{display:flex;align-items:center;gap:7px;margin-bottom:5px;flex-wrap:wrap}
+  .badge{font-size:10.5px;padding:2px 7px;border-radius:5px;font-weight:600;
+    letter-spacing:.3px;text-transform:uppercase}
+  .res .tc{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px;
+    margin-left:auto}
+  .res p{margin:2px 0 0;color:var(--muted);font-size:12.5px;
+    overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .score{height:3px;border-radius:3px;background:var(--accent);margin-top:7px}
+  .empty{padding:30px;text-align:center;color:var(--muted)}
+  .pchips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+  .pchip{font-size:11px;padding:2px 8px;border-radius:20px;background:var(--panel2);
+    border:1px solid var(--line);color:var(--txt)}
+  .pchip.scorer{background:#f5c45122;border-color:var(--gold);color:var(--gold);font-weight:600}
+  .pchip.assist{background:#3ecf8e22;border-color:var(--good);color:var(--good)}
+  .isrc{font-size:10px;color:var(--muted);align-self:center;font-style:italic}
+</style>
+</head>
+<body>
+<header>
+  <h1>Situation Search</h1>
+  <span class="tag">soccer • local index</span>
+  <span class="ctx" id="ctx">loading…</span>
+</header>
+
+<div class="wrap">
+  <div class="left card">
+    <video id="video" controls preload="metadata"></video>
+    <div class="nowbar">
+      <span class="tc" id="nowtc">00:00</span>
+      <span id="nowbadges"></span>
+    </div>
+    <div class="nowprose" id="nowprose">Pick a moment to jump the video.</div>
+    <div class="timeline">
+      <div class="lbl">Match timeline — click to jump · color = event</div>
+      <div class="ticks" id="ticks"></div>
+    </div>
+  </div>
+
+  <div class="right card">
+    <div class="searchbox">
+      <input id="q" type="text" autocomplete="off"
+        placeholder="Search situations in plain English…" />
+      <div class="examples" id="examples"></div>
+      <div class="filters">
+        <select id="fevent"><option value="">any event</option></select>
+        <select id="fphase"><option value="">any phase</option></select>
+      </div>
+    </div>
+    <div class="meta"><span class="dot" id="mdot"></span>
+      <span id="mtext">semantic search ready</span></div>
+    <div class="results" id="results"></div>
+  </div>
+</div>
+
+<script>
+const EVENT_COLORS = {
+  goal:'var(--gold)', celebration:'var(--good)', shot:'var(--warn)',
+  save:'var(--purple)', penalty:'#ff6b6b',
+  yellow_card:'#f5c451', red_card:'#ff4d4d', foul:'#ff8a5b', tackle:'#ff8a5b',
+  corner:'var(--blue)', free_kick:'var(--blue)', cross:'var(--blue)',
+  throw_in:'var(--blue)', offside:'#f0a742', duel:'var(--hot)',
+  attack:'#3ecf8e', buildup:'#5a6b85', transition:'#6b8cff',
+  substitution:'#9aa7b8', injury:'#b78bff', kickoff:'#7a869a',
+  out_of_play:'#3b4453', other:'#3b4453', none:'#3b4453'
+};
+const color = e => EVENT_COLORS[e] || '#3b4453';
+const EXAMPLES = ["who scored","yellow card","foul","shot on goal","attack",
+  "corner","goalkeeper save","goal celebration","substitution"];
+
+const video = document.getElementById('video');
+let MOMENTS = [], activeId = null;
+
+function badge(text, c){ return `<span class="badge" style="background:${c}22;color:${c}">${text}</span>`; }
+
+function attribution(m){
+  const chips=[];
+  const named=new Set();
+  if(m.scorer){ chips.push(`<span class="pchip scorer">⚽ ${m.scorer}</span>`); named.add(m.scorer); }
+  if(m.assist && !named.has(m.assist)){ chips.push(`<span class="pchip assist">🅰 ${m.assist}</span>`); named.add(m.assist); }
+  (m.players||[]).forEach(p=>{ if(!named.has(p)){ chips.push(`<span class="pchip">${p}</span>`); named.add(p); }});
+  if(!chips.length) return '';
+  const src = (m.identity_source && m.identity_source!=='none')
+    ? `<span class="isrc">via ${String(m.identity_source).replace(/_/g,' ')}</span>` : '';
+  return `<div class="pchips">${chips.join('')}${src}</div>`;
+}
+
+function setNow(m){
+  document.getElementById('nowtc').textContent = m.timecode;
+  document.getElementById('nowbadges').innerHTML =
+    badge(m.event, color(m.event)) + ' ' +
+    badge(m.zone_third, 'var(--muted)') + ' ' + badge(m.phase, 'var(--muted)');
+  document.getElementById('nowprose').innerHTML =
+    `<div>${m.prose||''}</div>${attribution(m)}`;
+}
+
+function jump(m){
+  activeId = m.id;
+  video.currentTime = m.t_seconds + 0.1;
+  video.play().catch(()=>{});
+  setNow(m);
+  document.querySelectorAll('.res').forEach(e=>e.classList.toggle('active', +e.dataset.id===m.id));
+  document.querySelectorAll('.tick').forEach(e=>e.classList.toggle('active', +e.dataset.id===m.id));
+}
+
+function renderTicks(){
+  const t = document.getElementById('ticks');
+  t.innerHTML = '';
+  MOMENTS.forEach(m=>{
+    const d = document.createElement('div');
+    d.className='tick'; d.dataset.id=m.id;
+    d.style.background=color(m.event);
+    d.title=`${m.timecode} · ${m.event}`;
+    d.onclick=()=>jump(m);
+    t.appendChild(d);
+  });
+}
+
+function renderResults(list, semantic){
+  const box = document.getElementById('results');
+  const maxs = Math.max(...list.map(r=>r.score||0), 1e-6);
+  if(!list.length){ box.innerHTML='<div class="empty">No matching situations.</div>'; return; }
+  box.innerHTML = list.map(m=>`
+    <div class="res" data-id="${m.id}">
+      <img loading="lazy" src="/media/${m.image}" />
+      <div class="body">
+        <div class="top">
+          ${badge(m.event,color(m.event))}
+          ${m.card&&m.card!=='none'?badge(m.card+' card',color(m.card+'_card')):''}
+          ${badge(m.zone_side+' '+m.zone_third,'var(--muted)')}
+          ${m.pressure&&m.pressure!=='none'?badge('press:'+m.pressure,'var(--hot)'):''}
+          <span class="tc">${m.timecode}${m.score&&m.score!=='unknown'?' · '+m.score:''}</span>
+        </div>
+        <p>${m.prose||''}</p>
+        ${attribution(m)}
+        <div class="score" style="width:${Math.round(100*(m.score||0)/maxs)}%"></div>
+      </div>
+    </div>`).join('');
+  box.querySelectorAll('.res').forEach(el=>{
+    el.onclick=()=>jump(MOMENTS.find(x=>x.id===+el.dataset.id));
+  });
+  const dot=document.getElementById('mdot'), txt=document.getElementById('mtext');
+  dot.className='dot'+(semantic?'':' kw');
+  txt.textContent = semantic ? `semantic ranking · ${list.length} results`
+                             : `keyword ranking · ${list.length} results`;
+}
+
+let timer=null;
+async function doSearch(){
+  const q=document.getElementById('q').value;
+  const ev=document.getElementById('fevent').value;
+  const ph=document.getElementById('fphase').value;
+  const r=await fetch(`/api/search?q=${encodeURIComponent(q)}&event=${ev}&phase=${ph}`);
+  const j=await r.json();
+  renderResults(j.results, j.semantic);
+}
+function debounced(){ clearTimeout(timer); timer=setTimeout(doSearch,280); }
+
+async function init(){
+  const j=await (await fetch('/api/moments')).json();
+  MOMENTS=j.moments;
+  video.src=`/media/${j.video}`;
+  document.getElementById('ctx').textContent=`${MOMENTS.length} indexed moments · ${j.video}`;
+  const sc = MOMENTS.find(m=>m.scoreline && m.scoreline!=='unknown');
+  renderTicks();
+  // populate filters
+  const evs=[...new Set(MOMENTS.map(m=>m.event))].sort();
+  const phs=[...new Set(MOMENTS.map(m=>m.phase))].sort();
+  evs.forEach(e=>document.getElementById('fevent').insertAdjacentHTML('beforeend',`<option>${e}</option>`));
+  phs.forEach(p=>document.getElementById('fphase').insertAdjacentHTML('beforeend',`<option>${p}</option>`));
+  // examples
+  document.getElementById('examples').innerHTML=EXAMPLES
+    .map(e=>`<span class="chip">${e}</span>`).join('');
+  document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{
+    document.getElementById('q').value=c.textContent; doSearch();
+  });
+  document.getElementById('q').addEventListener('input',debounced);
+  document.getElementById('fevent').onchange=doSearch;
+  document.getElementById('fphase').onchange=doSearch;
+  renderResults(MOMENTS.map(m=>({...m,score:1})), false);
+  document.getElementById('mtext').textContent=`${MOMENTS.length} moments · type to search`;
+}
+init();
+</script>
+</body>
+</html>

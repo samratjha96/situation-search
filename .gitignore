@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.uv/
+
+# Data and media (large / licensed)
+data/
+*.mp4
+*.mkv
+*.jpg
+*.jpeg
+*.png
+!spike0_vlm_captions/frames/.gitkeep
+
+# Models
+*.gguf
+*.pt
+*.onnx
+
+# Outputs
+*.db
+*.sqlite
+sidecars/
