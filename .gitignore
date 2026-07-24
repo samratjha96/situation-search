@@ -18,6 +18,9 @@ data/
 *.pt
 *.onnx
 
+# Ultralytics tracking output
+runs/
+
 # Outputs
 *.db
 *.sqlite

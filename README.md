@@ -146,6 +146,38 @@ Known refinements: (1) cross-spelling name matching — the reasoning model's
 1-frame/10s sampling mislocates the exact score-change second and can miss a
 goal — denser sampling near score changes fixes both WHEN and WHO alignment.
 
+### v0.5 — video-native event detection (works on training footage)
+
+Goal: attribute events on ANY clip an analyst uploads — training-ground footage
+with no scoreboard, no commentary, no name graphics. `pipeline/video_events.py`
+chunks the clip and, per chunk, sends a burst of sampled frames to a VLM that
+reads the motion and returns events with best-effort identity (jersey number or
+shirt-colour + position, never a guessed name). Identity degrades gracefully:
+name (broadcast) -> number -> colour+position -> (future) a stable track ID.
+
+Two hard-won findings from verifying this (analyst-grade rigor):
+- The gateway (OpenAI-compatible proxy) SILENTLY DROPS video sent via video_url.
+  Gemini then confabulates a generic buildup->shot->goal from priors — it
+  invented scorelines ("FRA 0 SCO 0") and player names ("De Bruyne", "Haaland")
+  for a clip that was 0-0 possession. Impressive-looking, entirely fake.
+  Verified by asking a pure-perception question: video_url got shirt colours and
+  the scoreboard WRONG; a single image_url got both exactly right.
+- Fix: send a BURST of real frames as images (the gateway does process images),
+  with a calibrated prompt that may answer "nothing notable" and must not assume
+  a shot/goal. Result: confabulation gone; chunks return empty when quiet; a
+  0-0 possession chunk correctly reports "duel" instead of a phantom goal.
+
+Lesson baked into the repo: every layer looks great on a cherry-picked demo;
+only adversarial verification against ground truth tells you if it is real.
+
+### Tracking backbone (de-risked, not yet built)
+
+YOLO + ByteTrack runs locally (MPS) and detects players + ball, but out-of-the-
+box IDs fragment (42 IDs for ~15 players in 6s; ball barely seen in wide shots).
+Consistent "Player 1..N throughout" needs appearance re-ID + a stronger detector,
+and is far easier on a static training camera than on broadcast (cuts/pan/zoom).
+Treated as a flagship CV investment, not a quick win.
+
 ### Models used
 
 - VLM captions (batch): `google/gemini-2.5-flash` (fast, parallelised)
