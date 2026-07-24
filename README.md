@@ -115,6 +115,37 @@ An analyst can pull one player's big moments out of a clip.
   on a replay frame inflates a goal count). The fix is the same as above —
   event-level attribution, not per-frame.
 
+### v0.4 — event-level attribution (the accuracy fix)
+
+Per-frame attribution double-counts: one goal spans a goal frame plus several
+celebration/replay frames, and each frame independently guesses a scorer from a
+narrow commentary window. Result: inflated, wrong stats (Bruno "3 goals",
+Dorgu "5"). Frame-level is the wrong unit.
+
+`pipeline/events.py` attributes at the EVENT level from two grounded signals:
+- **OCR scorebug score timeline -> WHEN/WHETHER a goal happened.** The score
+  increments exactly once per goal, so this is an objective, replay-proof goal
+  detector.
+- **Full commentary transcript -> WHO.** One holistic pass over the whole
+  transcript names each scorer once (de-duplicated). Uses a reasoning model and
+  line-delimited output (JSON was unreliable at length across models).
+
+Goals = score increments, each attributed to the scorer named nearby. Other
+events (cards, shots, saves, fouls, subs) come from the de-duplicated
+commentary list. Each event aligns to the nearest frame for playback. Player
+stats are then counted from this event list, not from frames.
+
+Result on the seed clip: 5-8 phantom goals -> 2 confirmed; Bruno 3 goals -> 0
+goals / 1 assist (correct); Mbeumo goal correct.
+
+Degrades gracefully: no scorebug -> commentary goals; no commentary ->
+score-change goals with no name; silent + no scorebug -> events from video only.
+
+Known refinements: (1) cross-spelling name matching — the reasoning model's
+"Bryan Mbeumo" does not yet merge with the frame model's "Mbumo"; (2) sparse
+1-frame/10s sampling mislocates the exact score-change second and can miss a
+goal — denser sampling near score changes fixes both WHEN and WHO alignment.
+
 ### Models used
 
 - VLM captions (batch): `google/gemini-2.5-flash` (fast, parallelised)
@@ -135,10 +166,13 @@ uv run --with mlx-whisper mlx_whisper data/seed_audio.wav \
   --model mlx-community/whisper-large-v3-turbo --language en \
   --output-format json --output-dir data/transcript
 
-# 3. Build the index (needs OPENROUTER_API_KEY; resumable, parallel)
+# 3. Build the per-frame index (needs OPENROUTER_API_KEY; resumable, parallel)
 uv run --with openai python pipeline/caption.py
 
-# 4. Start the app
+# 4. Attribute events (accurate player stats): scorebug goals + commentary WHO
+uv run --with openai python pipeline/events.py
+
+# 5. Start the app
 ./run_server.sh        # or: .venv/bin/python app/server.py
 # open http://127.0.0.1:8008
 ```

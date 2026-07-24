@@ -27,6 +27,7 @@ EMBED_MODEL = "openai/text-embedding-3-small"
 
 data = json.loads(INDEX.read_text())
 MOMENTS = data["moments"]
+EVENTS = data.get("events", [])  # event-level attribution (accurate, de-duplicated)
 
 # Build a normalized embedding matrix for fast cosine search.
 _dim = next((len(m["embedding"]) for m in MOMENTS if m.get("embedding")), 0)
@@ -124,6 +125,10 @@ def _build_players():
     for m in MOMENTS:
         for n in _mentions(m):
             counts[n] += 1
+    for e in EVENTS:  # include event names so frame + event spellings cluster together
+        for n in (e.get("player"), e.get("assist")):
+            if _is_named(n):
+                counts[_norm(n)] += 1
     clusters = []  # each: {variants: {name: count}}
     for name, cnt in counts.most_common():
         for cl in clusters:
@@ -161,21 +166,22 @@ def moment_importance(m, pc=None):
 
 
 def player_stats(pc):
-    g = a = s = c = ap = 0
-    for m in MOMENTS:
-        names = {canon(n) for n in _mentions(m)}
-        if pc not in names:
-            continue
-        ap += 1
-        roles = {k: canon(m[k]) for k in ROLE_KEYS if _is_named(m.get(k))}
-        if roles.get("scorer") == pc:
-            g += 1
-        if roles.get("assist") == pc:
+    # Counting stats come from the de-duplicated EVENT list (accurate), not frames.
+    g = a = s = c = 0
+    for e in EVENTS:
+        ep, ea = canon(e.get("player")), canon(e.get("assist"))
+        et = e.get("type")
+        if ep == pc:
+            if et == "goal":
+                g += 1
+            elif et == "shot":
+                s += 1
+            elif et in ("yellow_card", "red_card"):
+                c += 1
+        if ea == pc and et == "goal":
             a += 1
-        if roles.get("shot_by") == pc or (m.get("event") == "shot" and pc in names):
-            s += 1
-        if roles.get("card_player") == pc:
-            c += 1
+    # Appearances = how many frames the player is visible in (from moments).
+    ap = sum(1 for m in MOMENTS if pc in {canon(n) for n in _mentions(m)})
     return {"goals": g, "assists": a, "shots": s, "cards": c, "appearances": ap}
 
 
@@ -203,6 +209,10 @@ def player(name: str):
     pc = canon(name) or _norm(name)
     moms = [public(m, imp) for imp, m in player_moments(pc)]
     return JSONResponse({"name": pc, "stats": player_stats(pc), "moments": moms})
+
+@app.get("/api/events")
+def events():
+    return JSONResponse({"events": EVENTS})
 
 @app.get("/api/moments")
 def moments():
