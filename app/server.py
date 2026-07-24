@@ -27,7 +27,10 @@ EMBED_MODEL = "openai/text-embedding-3-small"
 
 data = json.loads(INDEX.read_text())
 MOMENTS = data["moments"]
-EVENTS = data.get("events", [])  # event-level attribution (accurate, de-duplicated)
+EVENTS = data.get("events", [])              # commentary/OCR events (goals via scorebug)
+VIDEO_EVENTS = data.get("video_events", [])  # video-native events (work on any footage)
+CONFIRMED_GOAL_TS = [e["t_seconds"] for e in EVENTS
+                     if e.get("type") == "goal" and e.get("confirmed")]
 
 # Build a normalized embedding matrix for fast cosine search.
 _dim = next((len(m["embedding"]) for m in MOMENTS if m.get("embedding")), 0)
@@ -213,6 +216,34 @@ def player(name: str):
 @app.get("/api/events")
 def events():
     return JSONResponse({"events": EVENTS})
+
+def _nearest_image(t):
+    return min(MOMENTS, key=lambda m: abs(m["t_seconds"] - t))["image"] if MOMENTS else None
+
+@app.get("/api/timeline")
+def timeline():
+    """Video-native events for the timeline, with a thumbnail and goal confirmation.
+    A 'goal' is confirmed only if the scorebug (commentary/OCR) corroborates it near
+    that time; otherwise it is flagged unconfirmed rather than trusted."""
+    out = []
+    for e in VIDEO_EVENTS:
+        t = e["t_seconds"]
+        confirmed = None
+        if e.get("type") == "goal":
+            confirmed = any(abs(t - g) <= 20 for g in CONFIRMED_GOAL_TS)
+        out.append({**e, "image": _nearest_image(t), "confirmed": confirmed})
+    out.sort(key=lambda x: x["t_seconds"])
+    # de-dup: adjacent chunks re-detect the same event — collapse same type within 4s
+    deduped = []
+    for e in out:
+        if deduped and e["type"] == deduped[-1]["type"] and \
+                abs(e["t_seconds"] - deduped[-1]["t_seconds"]) <= 4:
+            continue
+        deduped.append(e)
+    out = deduped
+    dur = max((m["t_seconds"] for m in MOMENTS), default=0) + 10
+    return JSONResponse({"events": out, "duration": dur,
+                         "confirmed_goals": len(CONFIRMED_GOAL_TS)})
 
 @app.get("/api/moments")
 def moments():

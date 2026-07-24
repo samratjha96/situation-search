@@ -170,6 +170,18 @@ Two hard-won findings from verifying this (analyst-grade rigor):
 Lesson baked into the repo: every layer looks great on a cherry-picked demo;
 only adversarial verification against ground truth tells you if it is real.
 
+### App — event timeline (the polished slice)
+
+The UI centers on an **event timeline** built from the video-native events:
+- A minute-gridded axis with one marker per event, coloured by type (goals gold
+  and tall, notable events emphasised, routine play faded), click to jump the video.
+- A filterable, chronological event list (thumbnail, type, best-effort identity,
+  timecode) — default filter "notable", toggle to any type or "all".
+- Goals are labelled **confirmed** only when the scorebug corroborates them, else
+  **unconfirmed** — the verify-don't-trust rule is visible in the UI, not hidden.
+- `/api/timeline` de-dups events re-detected by adjacent chunks.
+- Two more tabs reuse earlier work: Search (semantic + keyword) and Players.
+
 ### Tracking backbone (de-risked, not yet built)
 
 YOLO + ByteTrack runs locally (MPS) and detects players + ball, but out-of-the-

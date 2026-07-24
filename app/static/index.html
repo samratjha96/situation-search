@@ -14,284 +14,279 @@
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--txt);
     font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-  a{color:var(--accent)}
-  header{padding:16px 22px;border-bottom:1px solid var(--line);
-    display:flex;align-items:baseline;gap:14px;background:var(--panel)}
+  header{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;
+    align-items:baseline;gap:12px;background:var(--panel)}
   header h1{margin:0;font-size:17px;letter-spacing:.2px}
   header .tag{font-size:11px;color:var(--muted);border:1px solid var(--line);
     padding:2px 8px;border-radius:20px}
   header .ctx{margin-left:auto;font-size:12px;color:var(--muted)}
-  .wrap{display:grid;grid-template-columns:minmax(420px,1fr) minmax(420px,1fr);
-    gap:18px;padding:18px;max-width:1400px;margin:0 auto}
-  @media(max-width:900px){.wrap{grid-template-columns:1fr}}
+  .wrap{display:grid;grid-template-columns:minmax(430px,1fr) minmax(430px,1fr);
+    gap:18px;padding:18px;max-width:1440px;margin:0 auto}
+  @media(max-width:920px){.wrap{grid-template-columns:1fr}}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px}
   .left{position:sticky;top:18px;align-self:start}
   video{width:100%;border-radius:12px 12px 0 0;display:block;background:#000}
-  .nowbar{padding:12px 14px;display:flex;gap:10px;align-items:center;
-    border-top:1px solid var(--line);flex-wrap:wrap}
+  .nowbar{padding:11px 14px;display:flex;gap:9px;align-items:center;flex-wrap:wrap;
+    border-top:1px solid var(--line)}
   .nowbar .tc{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px}
-  .nowprose{padding:0 14px 14px;color:var(--muted);font-size:13px;min-height:20px}
-  .timeline{padding:12px 14px;border-top:1px solid var(--line)}
-  .timeline .lbl{font-size:11px;color:var(--muted);margin-bottom:8px;
-    text-transform:uppercase;letter-spacing:.6px}
-  .ticks{display:flex;gap:2px;height:34px;align-items:stretch}
-  .tick{flex:1;border-radius:3px;opacity:.55;cursor:pointer;transition:.12s;
-    min-width:3px}
-  .tick:hover{opacity:1;transform:scaleY(1.12)}
-  .tick.active{opacity:1;outline:2px solid #fff}
-  .searchbox{padding:16px}
-  .searchbox input[type=text]{width:100%;padding:13px 15px;font-size:15px;
-    background:var(--panel2);border:1px solid var(--line);border-radius:10px;
-    color:var(--txt);outline:none}
-  .searchbox input:focus{border-color:var(--accent)}
-  .examples{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
-  .chip{font-size:12px;padding:6px 11px;border-radius:20px;cursor:pointer;
-    background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
-  .chip:hover{color:var(--txt);border-color:var(--accent)}
-  .filters{display:flex;gap:9px;margin-top:12px;flex-wrap:wrap}
-  select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
-    padding:8px 10px;border-radius:8px;font-size:12px}
-  .meta{display:flex;align-items:center;gap:8px;padding:2px 18px 10px;
-    color:var(--muted);font-size:12px}
-  .dot{width:7px;height:7px;border-radius:50%;background:var(--good)}
-  .dot.kw{background:var(--warn)}
-  .results{padding:4px 12px 18px;display:flex;flex-direction:column;gap:10px;
-    max-height:70vh;overflow:auto}
-  .res{display:grid;grid-template-columns:132px 1fr;gap:12px;padding:10px;
-    border:1px solid var(--line);border-radius:10px;cursor:pointer;
-    background:var(--panel);transition:.12s}
-  .res:hover{border-color:var(--accent);background:var(--panel2)}
-  .res.active{border-color:#fff}
-  .res img{width:132px;height:74px;object-fit:cover;border-radius:7px;background:#000}
-  .res .body{min-width:0}
-  .res .top{display:flex;align-items:center;gap:7px;margin-bottom:5px;flex-wrap:wrap}
+  .nowprose{padding:0 14px 12px;color:var(--muted);font-size:13px;min-height:18px}
   .badge{font-size:10.5px;padding:2px 7px;border-radius:5px;font-weight:600;
     letter-spacing:.3px;text-transform:uppercase}
-  .res .tc{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px;
-    margin-left:auto}
-  .res p{margin:2px 0 0;color:var(--muted);font-size:12.5px;
-    overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-  .score{height:3px;border-radius:3px;background:var(--accent);margin-top:7px}
-  .empty{padding:30px;text-align:center;color:var(--muted)}
-  .pchips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
-  .pchip{font-size:11px;padding:2px 8px;border-radius:20px;background:var(--panel2);
+  /* ---- Event timeline (hero) ---- */
+  .tl{padding:14px}
+  .tl .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;
+    letter-spacing:.6px;margin-bottom:10px;display:flex;gap:8px;align-items:center}
+  .axis{position:relative;height:66px;border-bottom:1px solid var(--line);
+    margin-bottom:6px}
+  .grid{position:absolute;top:0;bottom:0;border-left:1px dashed #2b3446}
+  .grid span{position:absolute;bottom:-18px;transform:translateX(-50%);
+    font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .mk{position:absolute;bottom:0;width:3px;border-radius:2px;cursor:pointer;
+    transform:translateX(-1.5px);transition:.1s}
+  .mk:hover{width:5px;transform:translateX(-2.5px)}
+  .mk.sel{outline:2px solid #fff;z-index:3}
+  .mk.goal{width:5px;transform:translateX(-2.5px)}
+  .axtimes{height:14px}
+  /* ---- tabs + lists ---- */
+  .tabs{display:flex;gap:4px;padding:12px 12px 0}
+  .tab{padding:8px 14px;font-size:13px;cursor:pointer;color:var(--muted);
+    border:1px solid transparent;border-bottom:none;border-radius:8px 8px 0 0}
+  .tab.active{color:var(--txt);background:var(--panel2);border-color:var(--line)}
+  .pane{padding:12px;display:none}
+  .pane.active{display:block}
+  .filters{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  .chip{font-size:11.5px;padding:5px 10px;border-radius:20px;cursor:pointer;
+    background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
+  .chip:hover{color:var(--txt)}
+  .chip.on{color:#fff}
+  input[type=text]{width:100%;padding:12px 14px;font-size:14px;background:var(--panel2);
+    border:1px solid var(--line);border-radius:10px;color:var(--txt);outline:none}
+  input:focus{border-color:var(--accent)}
+  .list{display:flex;flex-direction:column;gap:8px;max-height:64vh;overflow:auto;margin-top:10px}
+  .row{display:grid;grid-template-columns:104px 1fr;gap:11px;padding:9px;
+    border:1px solid var(--line);border-radius:10px;cursor:pointer;transition:.1s}
+  .row:hover{border-color:var(--accent);background:var(--panel2)}
+  .row.sel{border-color:#fff}
+  .row img{width:104px;height:58px;object-fit:cover;border-radius:6px;background:#000}
+  .row .top{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .row .tc{margin-left:auto;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .row p{margin:4px 0 0;color:var(--muted);font-size:12px}
+  .pchip{font-size:11px;padding:1px 7px;border-radius:20px;background:var(--panel2);
     border:1px solid var(--line);color:var(--txt)}
-  .pchip.scorer{background:#f5c45122;border-color:var(--gold);color:var(--gold);font-weight:600}
-  .pchip.assist{background:#3ecf8e22;border-color:var(--good);color:var(--good)}
-  .isrc{font-size:10px;color:var(--muted);align-self:center;font-style:italic}
-  .players{padding:12px 14px;border-top:1px solid var(--line)}
-  .plist{display:flex;flex-direction:column;gap:5px;max-height:300px;overflow:auto}
-  .prow{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;
+  .conf{font-size:10px;color:var(--good);border:1px solid var(--good);
+    padding:1px 6px;border-radius:20px}
+  .unconf{font-size:10px;color:var(--warn);border:1px solid var(--warn);
+    padding:1px 6px;border-radius:20px}
+  .plist .prow{display:flex;gap:8px;align-items:center;padding:7px 9px;border-radius:8px;
     cursor:pointer;border:1px solid transparent}
-  .prow:hover{background:var(--panel2);border-color:var(--line)}
-  .prow.active{background:var(--panel2);border-color:var(--accent)}
-  .prow .pn{font-size:13px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .prow .st{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
-  .prow .g{color:var(--gold);font-weight:600}
-  .clearp{cursor:pointer;color:var(--accent);font-size:12px;border:1px solid var(--line);
-    padding:3px 9px;border-radius:20px;background:var(--panel2)}
+  .plist .prow:hover{background:var(--panel2);border-color:var(--line)}
+  .plist .prow.sel{border-color:var(--accent);background:var(--panel2)}
+  .plist .pn{flex:1}.plist .st{font-size:11px;color:var(--muted)}
+  .g{color:var(--gold);font-weight:600}
+  .note{font-size:11px;color:var(--muted);margin:2px 0 8px}
+  .empty{padding:26px;text-align:center;color:var(--muted)}
 </style>
 </head>
 <body>
 <header>
   <h1>Situation Search</h1>
-  <span class="tag">soccer • local index</span>
+  <span class="tag">soccer · local</span>
   <span class="ctx" id="ctx">loading…</span>
 </header>
 
 <div class="wrap">
   <div class="left card">
     <video id="video" controls preload="metadata"></video>
-    <div class="nowbar">
-      <span class="tc" id="nowtc">00:00</span>
-      <span id="nowbadges"></span>
-    </div>
-    <div class="nowprose" id="nowprose">Pick a moment to jump the video.</div>
-    <div class="timeline">
-      <div class="lbl">Match timeline — click to jump · color = event</div>
-      <div class="ticks" id="ticks"></div>
-    </div>
-    <div class="players">
-      <div class="lbl">Players — click for their big moments</div>
-      <div class="plist" id="plist"></div>
+    <div class="nowbar"><span class="tc" id="nowtc">00:00</span><span id="nowbadges"></span></div>
+    <div class="nowprose" id="nowprose">Click any event to jump the video.</div>
+    <div class="tl">
+      <div class="lbl">Event timeline <span id="tlcount"></span></div>
+      <div class="axis" id="axis"></div>
+      <div class="axtimes"></div>
     </div>
   </div>
 
   <div class="right card">
-    <div class="searchbox">
-      <input id="q" type="text" autocomplete="off"
-        placeholder="Search situations in plain English…" />
-      <div class="examples" id="examples"></div>
-      <div class="filters">
-        <select id="fevent"><option value="">any event</option></select>
-        <select id="fphase"><option value="">any phase</option></select>
-      </div>
+    <div class="tabs">
+      <div class="tab active" data-tab="events">Events</div>
+      <div class="tab" data-tab="search">Search</div>
+      <div class="tab" data-tab="players">Players</div>
     </div>
-    <div class="meta"><span class="dot" id="mdot"></span>
-      <span id="mtext">semantic search ready</span></div>
-    <div class="results" id="results"></div>
+
+    <div class="pane active" id="pane-events">
+      <div class="note" id="evnote"></div>
+      <div class="filters" id="evfilters"></div>
+      <div class="list" id="evlist"></div>
+    </div>
+
+    <div class="pane" id="pane-search">
+      <input id="q" type="text" placeholder="Search situations in plain English…" autocomplete="off"/>
+      <div class="filters" id="examples" style="margin-top:11px"></div>
+      <div class="note" id="srnote"></div>
+      <div class="list" id="srlist"></div>
+    </div>
+
+    <div class="pane" id="pane-players">
+      <div class="plist list" id="plist"></div>
+      <div class="note">Stats are counted from the confirmed event list, not per frame.</div>
+      <div class="note" id="prnote"></div>
+      <div class="list" id="prlist"></div>
+    </div>
   </div>
 </div>
 
 <script>
-const EVENT_COLORS = {
-  goal:'var(--gold)', celebration:'var(--good)', shot:'var(--warn)',
-  save:'var(--purple)', penalty:'#ff6b6b',
-  yellow_card:'#f5c451', red_card:'#ff4d4d', foul:'#ff8a5b', tackle:'#ff8a5b',
-  corner:'var(--blue)', free_kick:'var(--blue)', cross:'var(--blue)',
-  throw_in:'var(--blue)', offside:'#f0a742', duel:'var(--hot)',
-  attack:'#3ecf8e', buildup:'#5a6b85', transition:'#6b8cff',
-  substitution:'#9aa7b8', injury:'#b78bff', kickoff:'#7a869a',
-  out_of_play:'#3b4453', other:'#3b4453', none:'#3b4453'
-};
-const color = e => EVENT_COLORS[e] || '#3b4453';
-const EXAMPLES = ["who scored","yellow card","foul","shot on goal","attack",
-  "corner","goalkeeper save","goal celebration","substitution"];
+const COLORS={goal:'var(--gold)',shot:'var(--warn)',save:'var(--purple)',
+  penalty:'#ff6b6b',foul:'#ff8a5b',tackle:'#ff8a5b',yellow_card:'#f5c451',
+  red_card:'#ff4d4d',corner:'var(--blue)',free_kick:'var(--blue)',cross:'var(--blue)',
+  throw_in:'var(--blue)',offside:'#f0a742',duel:'var(--hot)',dribble:'#3ecf8e',
+  interception:'#57c4c9',clearance:'#7a869a',pass:'#5a6b85',out_of_play:'#3b4453',
+  celebration:'var(--good)',other:'#3b4453'};
+const color=e=>COLORS[e]||'#3b4453';
+const NOTABLE=new Set(['goal','shot','save','penalty','foul','yellow_card','red_card',
+  'corner','free_kick','cross','tackle','duel']);
+const badge=(t,c)=>`<span class="badge" style="background:${c}22;color:${c}">${t}</span>`;
 
-const video = document.getElementById('video');
-let MOMENTS = [], activeId = null;
+const video=document.getElementById('video');
+let TL=[], DUR=620, MOMENTS=[], activeTypes=null, sel=null;
 
-function badge(text, c){ return `<span class="badge" style="background:${c}22;color:${c}">${text}</span>`; }
-
-function attribution(m){
-  const chips=[];
-  const named=new Set();
-  if(m.scorer){ chips.push(`<span class="pchip scorer">⚽ ${m.scorer}</span>`); named.add(m.scorer); }
-  if(m.assist && !named.has(m.assist)){ chips.push(`<span class="pchip assist">🅰 ${m.assist}</span>`); named.add(m.assist); }
-  (m.players||[]).forEach(p=>{ if(!named.has(p)){ chips.push(`<span class="pchip">${p}</span>`); named.add(p); }});
-  if(!chips.length) return '';
-  const src = (m.identity_source && m.identity_source!=='none')
-    ? `<span class="isrc">via ${String(m.identity_source).replace(/_/g,' ')}</span>` : '';
-  return `<div class="pchips">${chips.join('')}${src}</div>`;
+function jump(t,id){
+  sel=id; video.currentTime=t+0.05; video.play().catch(()=>{});
+  document.querySelectorAll('.mk').forEach(m=>m.classList.toggle('sel',m.dataset.id==id));
+  document.querySelectorAll('.row').forEach(r=>r.classList.toggle('sel',r.dataset.id==id));
+}
+function setNow(e){
+  document.getElementById('nowtc').textContent=e.timecode;
+  const conf = e.type==='goal' ? (e.confirmed?' <span class="conf">confirmed</span>':' <span class="unconf">unconfirmed</span>'):'';
+  document.getElementById('nowbadges').innerHTML=badge(e.type,color(e.type))+conf+
+    (e.key_player?` <span class="pchip">${e.key_player}</span>`:'');
+  document.getElementById('nowprose').textContent=e.summary||'';
 }
 
-function setNow(m){
-  document.getElementById('nowtc').textContent = m.timecode;
-  document.getElementById('nowbadges').innerHTML =
-    badge(m.event, color(m.event)) + ' ' +
-    badge(m.zone_third, 'var(--muted)') + ' ' + badge(m.phase, 'var(--muted)');
-  document.getElementById('nowprose').innerHTML =
-    `<div>${m.prose||''}</div>${attribution(m)}`;
-}
-
-function jump(m){
-  activeId = m.id;
-  video.currentTime = m.t_seconds + 0.1;
-  video.play().catch(()=>{});
-  setNow(m);
-  document.querySelectorAll('.res').forEach(e=>e.classList.toggle('active', +e.dataset.id===m.id));
-  document.querySelectorAll('.tick').forEach(e=>e.classList.toggle('active', +e.dataset.id===m.id));
-}
-
-function renderTicks(){
-  const t = document.getElementById('ticks');
-  t.innerHTML = '';
-  MOMENTS.forEach(m=>{
-    const d = document.createElement('div');
-    d.className='tick'; d.dataset.id=m.id;
-    d.style.background=color(m.event);
-    d.title=`${m.timecode} · ${m.event}`;
-    d.onclick=()=>jump(m);
-    t.appendChild(d);
+function renderAxis(){
+  const ax=document.getElementById('axis'); ax.innerHTML='';
+  for(let mnt=0;mnt<=DUR;mnt+=60){
+    const g=document.createElement('div'); g.className='grid';
+    g.style.left=(100*mnt/DUR)+'%';
+    g.innerHTML=`<span>${String(Math.floor(mnt/60)).padStart(2,'0')}:00</span>`;
+    ax.appendChild(g);
+  }
+  TL.filter(e=>!activeTypes||activeTypes.has(e.type)).forEach(e=>{
+    const m=document.createElement('div');
+    m.className='mk'+(e.type==='goal'?' goal':''); m.dataset.id=e._id;
+    m.style.left=(100*e.t_seconds/DUR)+'%';
+    m.style.background=color(e.type);
+    m.style.height=(NOTABLE.has(e.type)?66:26)+'px';
+    m.style.opacity=NOTABLE.has(e.type)?0.95:0.4;
+    m.title=`${e.timecode} · ${e.type}${e.key_player?' · '+e.key_player:''}`;
+    m.onclick=()=>{jump(e.t_seconds,e._id);setNow(e);};
+    ax.appendChild(m);
   });
 }
-
-function renderResults(list, semantic){
-  const box = document.getElementById('results');
-  const maxs = Math.max(...list.map(r=>r.relevance||0), 1e-6);
-  if(!list.length){ box.innerHTML='<div class="empty">No matching situations.</div>'; return; }
-  box.innerHTML = list.map(m=>`
-    <div class="res" data-id="${m.id}">
-      <img loading="lazy" src="/media/${m.image}" />
-      <div class="body">
+function renderEvents(){
+  const list=TL.filter(e=>!activeTypes||activeTypes.has(e.type));
+  const box=document.getElementById('evlist');
+  box.innerHTML=list.length?list.map(e=>`
+    <div class="row" data-id="${e._id}">
+      <img loading="lazy" src="/media/${e.image}"/>
+      <div>
         <div class="top">
-          ${badge(m.event,color(m.event))}
-          ${m.card&&m.card!=='none'?badge(m.card+' card',color(m.card+'_card')):''}
-          ${badge(m.zone_side+' '+m.zone_third,'var(--muted)')}
-          ${m.pressure&&m.pressure!=='none'?badge('press:'+m.pressure,'var(--hot)'):''}
-          <span class="tc">${m.timecode}${m.score&&m.score!=='unknown'?' · '+m.score:''}</span>
+          ${badge(e.type,color(e.type))}
+          ${e.type==='goal'?(e.confirmed?'<span class="conf">confirmed</span>':'<span class="unconf">unconfirmed</span>'):''}
+          ${e.key_player?`<span class="pchip">${e.key_player}</span>`:''}
+          <span class="tc">${e.timecode}</span>
         </div>
-        <p>${m.prose||''}</p>
-        ${attribution(m)}
-        <div class="score" style="width:${Math.round(100*(m.relevance||0)/maxs)}%"></div>
+        <p>${e.summary||''}</p>
       </div>
-    </div>`).join('');
-  box.querySelectorAll('.res').forEach(el=>{
-    el.onclick=()=>jump(MOMENTS.find(x=>x.id===+el.dataset.id));
+    </div>`).join(''):'<div class="empty">No events of these types.</div>';
+  box.querySelectorAll('.row').forEach(el=>{
+    const e=TL.find(x=>x._id==el.dataset.id);
+    el.onclick=()=>{jump(e.t_seconds,e._id);setNow(e);};
   });
-  const dot=document.getElementById('mdot'), txt=document.getElementById('mtext');
-  dot.className='dot'+(semantic?'':' kw');
-  txt.textContent = semantic ? `semantic ranking · ${list.length} results`
-                             : `keyword ranking · ${list.length} results`;
+}
+function renderFilters(){
+  const types=[...new Set(TL.map(e=>e.type))].sort((a,b)=>
+    (NOTABLE.has(b)?1:0)-(NOTABLE.has(a)?1:0)||a.localeCompare(b));
+  const box=document.getElementById('evfilters');
+  box.innerHTML=`<span class="chip" data-t="__notable">notable</span>
+    <span class="chip" data-t="__all">all</span>`+
+    types.map(t=>`<span class="chip" data-t="${t}" style="border-color:${color(t)}55">${t}</span>`).join('');
+  box.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{
+    const t=c.dataset.t;
+    if(t==='__all') activeTypes=null;
+    else if(t==='__notable') activeTypes=new Set(NOTABLE);
+    else activeTypes=new Set([t]);
+    box.querySelectorAll('.chip').forEach(x=>x.classList.remove('on')); c.classList.add('on');
+    renderAxis(); renderEvents();
+  });
 }
 
-let timer=null, activePlayer=null;
+// ---- tabs ----
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===t));
+  document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('active',p.id==='pane-'+t.dataset.tab));
+});
+
+// ---- search ----
+const EXAMPLES=["who scored","yellow card","shot on goal","corner","goalkeeper save","counter attack"];
+let timer=null;
 async function doSearch(){
-  activePlayer=null;
-  document.querySelectorAll('.prow').forEach(e=>e.classList.remove('active'));
   const q=document.getElementById('q').value;
-  const ev=document.getElementById('fevent').value;
-  const ph=document.getElementById('fphase').value;
-  const r=await fetch(`/api/search?q=${encodeURIComponent(q)}&event=${ev}&phase=${ph}`);
-  const j=await r.json();
-  renderResults(j.results, j.semantic);
+  const j=await(await fetch(`/api/search?q=${encodeURIComponent(q)}`)).json();
+  const box=document.getElementById('srlist');
+  const maxs=Math.max(...j.results.map(r=>r.relevance||0),1e-6);
+  box.innerHTML=j.results.length?j.results.map(m=>`
+    <div class="row" data-t="${m.t_seconds}">
+      <img loading="lazy" src="/media/${m.image}"/>
+      <div><div class="top">${badge(m.event,color(m.event))}
+        ${m.scorer?`<span class="pchip">⚽ ${m.scorer}</span>`:''}
+        <span class="tc">${m.timecode}</span></div><p>${m.prose||''}</p></div></div>`).join(''):
+    '<div class="empty">No matches.</div>';
+  box.querySelectorAll('.row').forEach(el=>el.onclick=()=>jump(+el.dataset.t,null));
+  document.getElementById('srnote').textContent=(j.semantic?'semantic':'keyword')+` · ${j.results.length} results`;
 }
-function debounced(){ clearTimeout(timer); timer=setTimeout(doSearch,280); }
+document.getElementById('q').addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(doSearch,280);});
+document.getElementById('examples').innerHTML=EXAMPLES.map(e=>`<span class="chip">${e}</span>`).join('');
+document.querySelectorAll('#examples .chip').forEach(c=>c.onclick=()=>{document.getElementById('q').value=c.textContent;doSearch();});
 
-function renderPlayers(list){
-  document.getElementById('plist').innerHTML = list.map(p=>{
-    const st=[p.goals?`<span class="g">⚽${p.goals}</span>`:'', p.assists?`🅰${p.assists}`:'',
-      p.shots?`Sh${p.shots}`:'', p.cards?`🟨${p.cards}`:''].filter(Boolean).join(' ')
-      || `${p.appearances} moments`;
-    return `<div class="prow" data-name="${encodeURIComponent(p.name)}">
-      <span class="pn">${p.name}</span><span class="st">${st}</span></div>`;
+// ---- players ----
+async function loadPlayers(){
+  const j=await(await fetch('/api/players')).json();
+  document.getElementById('plist').innerHTML=j.players.map(p=>{
+    const st=[p.goals?`<span class="g">⚽${p.goals}</span>`:'',p.assists?`🅰${p.assists}`:'',
+      p.shots?`Sh${p.shots}`:'',p.cards?`🟨${p.cards}`:''].filter(Boolean).join(' ')||`${p.appearances} moments`;
+    return `<div class="prow" data-n="${encodeURIComponent(p.name)}"><span class="pn">${p.name}</span><span class="st">${st}</span></div>`;
   }).join('');
-  document.querySelectorAll('.prow').forEach(el=>el.onclick=()=>selectPlayer(decodeURIComponent(el.dataset.name)));
+  document.querySelectorAll('#plist .prow').forEach(el=>el.onclick=()=>selectPlayer(decodeURIComponent(el.dataset.n),el));
 }
-
-async function selectPlayer(name){
-  activePlayer=name;
-  document.getElementById('q').value='';
-  document.querySelectorAll('.prow').forEach(e=>e.classList.toggle('active', decodeURIComponent(e.dataset.name)===name));
-  const j=await (await fetch(`/api/player?name=${encodeURIComponent(name)}`)).json();
-  renderResults(j.moments, false);
+async function selectPlayer(name,el){
+  document.querySelectorAll('#plist .prow').forEach(x=>x.classList.toggle('sel',x===el));
+  const j=await(await fetch(`/api/player?name=${encodeURIComponent(name)}`)).json();
   const s=j.stats;
-  const parts=[`${s.goals} goals`,`${s.assists} assists`,`${s.shots} shots`,`${s.cards} cards`,`${s.appearances} moments`];
-  document.getElementById('mdot').className='dot';
-  document.getElementById('mtext').innerHTML=
-    `<b>${name}</b> — big moments · ${parts.join(' · ')} <span class="clearp" id="clearp">clear</span>`;
-  document.getElementById('clearp').onclick=()=>{ activePlayer=null;
-    document.querySelectorAll('.prow').forEach(e=>e.classList.remove('active')); doSearch(); };
+  document.getElementById('prnote').innerHTML=`<b>${name}</b> — ${s.goals}G ${s.assists}A ${s.shots}Sh ${s.cards}C · ${s.appearances} moments`;
+  const box=document.getElementById('prlist');
+  box.innerHTML=j.moments.map(m=>`
+    <div class="row" data-t="${m.t_seconds}"><img loading="lazy" src="/media/${m.image}"/>
+    <div><div class="top">${badge(m.event,color(m.event))}<span class="tc">${m.timecode}</span></div>
+    <p>${m.prose||''}</p></div></div>`).join('');
+  box.querySelectorAll('.row').forEach(x=>x.onclick=()=>jump(+x.dataset.t,null));
 }
 
 async function init(){
-  const j=await (await fetch('/api/moments')).json();
-  MOMENTS=j.moments;
-  video.src=`/media/${j.video}`;
-  document.getElementById('ctx').textContent=`${MOMENTS.length} indexed moments · ${j.video}`;
-  const sc = MOMENTS.find(m=>m.scoreline && m.scoreline!=='unknown');
-  renderTicks();
-  // populate filters
-  const evs=[...new Set(MOMENTS.map(m=>m.event))].sort();
-  const phs=[...new Set(MOMENTS.map(m=>m.phase))].sort();
-  evs.forEach(e=>document.getElementById('fevent').insertAdjacentHTML('beforeend',`<option>${e}</option>`));
-  phs.forEach(p=>document.getElementById('fphase').insertAdjacentHTML('beforeend',`<option>${p}</option>`));
-  // examples
-  document.getElementById('examples').innerHTML=EXAMPLES
-    .map(e=>`<span class="chip">${e}</span>`).join('');
-  document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{
-    document.getElementById('q').value=c.textContent; doSearch();
-  });
-  document.getElementById('q').addEventListener('input',debounced);
-  document.getElementById('fevent').onchange=doSearch;
-  document.getElementById('fphase').onchange=doSearch;
-  renderResults(MOMENTS.map(m=>({...m,relevance:1})), false);
-  document.getElementById('mtext').textContent=`${MOMENTS.length} moments · type to search`;
-  // load player highlights panel
-  const pj=await (await fetch('/api/players')).json();
-  renderPlayers(pj.players);
-  const pp=new URLSearchParams(location.search).get('player');
-  if(pp) selectPlayer(pp);
+  const mj=await(await fetch('/api/moments')).json();
+  MOMENTS=mj.moments; video.src=`/media/${mj.video}`;
+  const tj=await(await fetch('/api/timeline')).json();
+  TL=tj.events.map((e,i)=>({...e,_id:i})); DUR=tj.duration;
+  document.getElementById('ctx').textContent=`${TL.length} events · ${mj.video}`;
+  document.getElementById('tlcount').textContent=`· ${TL.length} events · ${tj.confirmed_goals} confirmed goals`;
+  document.getElementById('evnote').innerHTML=
+    `Video-native detection (works with no scoreboard/commentary). Goals are marked `+
+    `<span class="conf">confirmed</span> only when the scorebug corroborates them, else `+
+    `<span class="unconf">unconfirmed</span>. Identity is best-effort (number/colour).`;
+  activeTypes=new Set(NOTABLE);
+  renderFilters();
+  document.querySelector('#evfilters .chip[data-t="__notable"]').classList.add('on');
+  renderAxis(); renderEvents(); loadPlayers();
 }
 init();
 </script>
