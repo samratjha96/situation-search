@@ -8,6 +8,9 @@ keyword-only if the embedding call fails, so the app still works offline.
 """
 import json
 import os
+import re
+from collections import Counter
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import numpy as np
@@ -52,10 +55,11 @@ def _api_key():
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=_api_key())
 
 # Public view of a moment (drop the bulky embedding vector).
-def public(m, score=None):
+# Note: use 'relevance' for the ranking score so we don't clobber the OCR 'score'.
+def public(m, relevance=None):
     d = {k: v for k, v in m.items() if k != "embedding"}
-    if score is not None:
-        d["score"] = round(float(score), 4)
+    if relevance is not None:
+        d["relevance"] = round(float(relevance), 4)
     return d
 
 def embed_query(text):
@@ -73,7 +77,132 @@ def keyword_score(m, terms):
     hay = " ".join(parts).lower()
     return sum(1.0 for t in terms if t in hay)
 
+# ---- Player highlights -----------------------------------------------------
+# Group phonetic / partial name variants into canonical players, then rank each
+# player's moments so an analyst can pull one player's big moments from a clip.
+
+ROLE_KEYS = ("scorer", "assist", "shot_by", "card_player")
+# Importance weight per event, for ranking a player's "big moments".
+W_EVENT = {"goal": 10, "penalty": 9, "red_card": 8, "assist": 7, "save": 6,
+           "shot": 5, "yellow_card": 5, "celebration": 4, "foul": 4, "cross": 3,
+           "corner": 3, "free_kick": 3, "tackle": 3, "offside": 3, "duel": 2,
+           "attack": 2, "substitution": 2, "injury": 2, "transition": 1,
+           "buildup": 1, "throw_in": 1, "kickoff": 1, "out_of_play": 0, "other": 0}
+
+
+def _norm(s):
+    return re.sub(r"\s+", " ", str(s or "").strip())
+
+
+def _is_named(s):
+    s = _norm(s)
+    return bool(s) and not s.startswith("#") and s.lower() not in ("unknown", "none", "n/a")
+
+
+def _mentions(m):
+    names = set()
+    for p in (m.get("players") or []):
+        if _is_named(p):
+            names.add(_norm(p))
+    for k in ROLE_KEYS:
+        if _is_named(m.get(k)):
+            names.add(_norm(m[k]))
+    return names
+
+
+def _similar(a, b):
+    a, b = a.lower(), b.lower()
+    if SequenceMatcher(None, a, b).ratio() >= 0.85:
+        return True
+    ta = {w for w in a.split() if len(w) >= 4}
+    tb = {w for w in b.split() if len(w) >= 4}
+    return bool(ta & tb)  # shared surname-length token
+
+
+def _build_players():
+    counts = Counter()
+    for m in MOMENTS:
+        for n in _mentions(m):
+            counts[n] += 1
+    clusters = []  # each: {variants: {name: count}}
+    for name, cnt in counts.most_common():
+        for cl in clusters:
+            if _similar(name, cl["canonical"]):
+                cl["variants"][name] = cnt
+                break
+        else:
+            clusters.append({"canonical": name, "variants": {name: cnt}})
+    cmap = {}
+    for cl in clusters:
+        # canonical = fullest (longest) variant, tie-break by frequency
+        cl["canonical"] = max(cl["variants"], key=lambda x: (len(x), cl["variants"][x]))
+        for v in cl["variants"]:
+            cmap[v.lower()] = cl["canonical"]
+    return clusters, cmap
+
+
+CLUSTERS, CANON = _build_players()
+
+
+def canon(name):
+    return CANON.get(_norm(name).lower())
+
+
+def moment_importance(m, pc=None):
+    base = W_EVENT.get(m.get("event"), 0)
+    bonus = 0
+    if pc:
+        for k, b in (("scorer", 6), ("assist", 5), ("shot_by", 4), ("card_player", 3)):
+            if m.get(k) and canon(m[k]) == pc:
+                bonus = max(bonus, b)
+    conf = m.get("event_confidence")
+    conf = conf if isinstance(conf, (int, float)) else 1.0
+    return (base + bonus) * conf
+
+
+def player_stats(pc):
+    g = a = s = c = ap = 0
+    for m in MOMENTS:
+        names = {canon(n) for n in _mentions(m)}
+        if pc not in names:
+            continue
+        ap += 1
+        roles = {k: canon(m[k]) for k in ROLE_KEYS if _is_named(m.get(k))}
+        if roles.get("scorer") == pc:
+            g += 1
+        if roles.get("assist") == pc:
+            a += 1
+        if roles.get("shot_by") == pc or (m.get("event") == "shot" and pc in names):
+            s += 1
+        if roles.get("card_player") == pc:
+            c += 1
+    return {"goals": g, "assists": a, "shots": s, "cards": c, "appearances": ap}
+
+
+def player_moments(pc):
+    scored = [(moment_importance(m, pc), m) for m in MOMENTS if pc in {canon(n) for n in _mentions(m)}]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return scored
+
+
 app = FastAPI(title="Soccer Situation Search")
+
+@app.get("/api/players")
+def players():
+    out = []
+    for cl in CLUSTERS:
+        pc = cl["canonical"]
+        st = player_stats(pc)
+        weight = st["goals"] * 10 + st["assists"] * 7 + st["shots"] * 3 + st["cards"] * 2 + st["appearances"]
+        out.append({"name": pc, "aliases": sorted(cl["variants"]), **st, "weight": weight})
+    out.sort(key=lambda x: x["weight"], reverse=True)
+    return JSONResponse({"players": out})
+
+@app.get("/api/player")
+def player(name: str):
+    pc = canon(name) or _norm(name)
+    moms = [public(m, imp) for imp, m in player_moments(pc)]
+    return JSONResponse({"name": pc, "stats": player_stats(pc), "moments": moms})
 
 @app.get("/api/moments")
 def moments():

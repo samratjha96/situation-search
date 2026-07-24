@@ -79,6 +79,17 @@
   .pchip.scorer{background:#f5c45122;border-color:var(--gold);color:var(--gold);font-weight:600}
   .pchip.assist{background:#3ecf8e22;border-color:var(--good);color:var(--good)}
   .isrc{font-size:10px;color:var(--muted);align-self:center;font-style:italic}
+  .players{padding:12px 14px;border-top:1px solid var(--line)}
+  .plist{display:flex;flex-direction:column;gap:5px;max-height:300px;overflow:auto}
+  .prow{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;
+    cursor:pointer;border:1px solid transparent}
+  .prow:hover{background:var(--panel2);border-color:var(--line)}
+  .prow.active{background:var(--panel2);border-color:var(--accent)}
+  .prow .pn{font-size:13px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .prow .st{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .prow .g{color:var(--gold);font-weight:600}
+  .clearp{cursor:pointer;color:var(--accent);font-size:12px;border:1px solid var(--line);
+    padding:3px 9px;border-radius:20px;background:var(--panel2)}
 </style>
 </head>
 <body>
@@ -99,6 +110,10 @@
     <div class="timeline">
       <div class="lbl">Match timeline — click to jump · color = event</div>
       <div class="ticks" id="ticks"></div>
+    </div>
+    <div class="players">
+      <div class="lbl">Players — click for their big moments</div>
+      <div class="plist" id="plist"></div>
     </div>
   </div>
 
@@ -183,7 +198,7 @@ function renderTicks(){
 
 function renderResults(list, semantic){
   const box = document.getElementById('results');
-  const maxs = Math.max(...list.map(r=>r.score||0), 1e-6);
+  const maxs = Math.max(...list.map(r=>r.relevance||0), 1e-6);
   if(!list.length){ box.innerHTML='<div class="empty">No matching situations.</div>'; return; }
   box.innerHTML = list.map(m=>`
     <div class="res" data-id="${m.id}">
@@ -198,7 +213,7 @@ function renderResults(list, semantic){
         </div>
         <p>${m.prose||''}</p>
         ${attribution(m)}
-        <div class="score" style="width:${Math.round(100*(m.score||0)/maxs)}%"></div>
+        <div class="score" style="width:${Math.round(100*(m.relevance||0)/maxs)}%"></div>
       </div>
     </div>`).join('');
   box.querySelectorAll('.res').forEach(el=>{
@@ -210,8 +225,10 @@ function renderResults(list, semantic){
                              : `keyword ranking · ${list.length} results`;
 }
 
-let timer=null;
+let timer=null, activePlayer=null;
 async function doSearch(){
+  activePlayer=null;
+  document.querySelectorAll('.prow').forEach(e=>e.classList.remove('active'));
   const q=document.getElementById('q').value;
   const ev=document.getElementById('fevent').value;
   const ph=document.getElementById('fphase').value;
@@ -220,6 +237,32 @@ async function doSearch(){
   renderResults(j.results, j.semantic);
 }
 function debounced(){ clearTimeout(timer); timer=setTimeout(doSearch,280); }
+
+function renderPlayers(list){
+  document.getElementById('plist').innerHTML = list.map(p=>{
+    const st=[p.goals?`<span class="g">⚽${p.goals}</span>`:'', p.assists?`🅰${p.assists}`:'',
+      p.shots?`Sh${p.shots}`:'', p.cards?`🟨${p.cards}`:''].filter(Boolean).join(' ')
+      || `${p.appearances} moments`;
+    return `<div class="prow" data-name="${encodeURIComponent(p.name)}">
+      <span class="pn">${p.name}</span><span class="st">${st}</span></div>`;
+  }).join('');
+  document.querySelectorAll('.prow').forEach(el=>el.onclick=()=>selectPlayer(decodeURIComponent(el.dataset.name)));
+}
+
+async function selectPlayer(name){
+  activePlayer=name;
+  document.getElementById('q').value='';
+  document.querySelectorAll('.prow').forEach(e=>e.classList.toggle('active', decodeURIComponent(e.dataset.name)===name));
+  const j=await (await fetch(`/api/player?name=${encodeURIComponent(name)}`)).json();
+  renderResults(j.moments, false);
+  const s=j.stats;
+  const parts=[`${s.goals} goals`,`${s.assists} assists`,`${s.shots} shots`,`${s.cards} cards`,`${s.appearances} moments`];
+  document.getElementById('mdot').className='dot';
+  document.getElementById('mtext').innerHTML=
+    `<b>${name}</b> — big moments · ${parts.join(' · ')} <span class="clearp" id="clearp">clear</span>`;
+  document.getElementById('clearp').onclick=()=>{ activePlayer=null;
+    document.querySelectorAll('.prow').forEach(e=>e.classList.remove('active')); doSearch(); };
+}
 
 async function init(){
   const j=await (await fetch('/api/moments')).json();
@@ -242,8 +285,13 @@ async function init(){
   document.getElementById('q').addEventListener('input',debounced);
   document.getElementById('fevent').onchange=doSearch;
   document.getElementById('fphase').onchange=doSearch;
-  renderResults(MOMENTS.map(m=>({...m,score:1})), false);
+  renderResults(MOMENTS.map(m=>({...m,relevance:1})), false);
   document.getElementById('mtext').textContent=`${MOMENTS.length} moments · type to search`;
+  // load player highlights panel
+  const pj=await (await fetch('/api/players')).json();
+  renderPlayers(pj.players);
+  const pp=new URLSearchParams(location.search).get('player');
+  if(pp) selectPlayer(pp);
 }
 init();
 </script>

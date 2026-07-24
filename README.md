@@ -99,6 +99,22 @@ Mount ~08:30). What is still noisy: on celebration / replay frames the model
 sometimes assigns the wrong scorer, and it occasionally names a player not in
 the match (misheard commentary). Fix path below.
 
+### v0.3 — per-player highlights
+
+An analyst can pull one player's big moments out of a clip.
+
+- The backend groups phonetic / partial name variants into canonical players
+  (fuzzy match on the caption names), then ranks each player's moments by an
+  event-importance weight (goal > assist > shot > card > ... > buildup) with a
+  bonus when the player is the protagonist (scorer/assist/shot_by/card_player).
+- Endpoints: `/api/players` (roster with goals/assists/shots/cards) and
+  `/api/player?name=` (one player's moments, ranked). Deep-link: `?player=Name`.
+- UI: a Players panel; click a player to see their ranked highlights with a
+  stat line. Each attribution shows its provenance (via commentary / jersey).
+- Honest limit: player stats inherit the attribution noise (e.g. a wrong scorer
+  on a replay frame inflates a goal count). The fix is the same as above —
+  event-level attribution, not per-frame.
+
 ### Models used
 
 - VLM captions (batch): `google/gemini-2.5-flash` (fast, parallelised)
