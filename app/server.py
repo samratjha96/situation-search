@@ -228,10 +228,12 @@ def timeline():
     out = []
     for e in VIDEO_EVENTS:
         t = e["t_seconds"]
-        confirmed = None
+        # Goals are detected from the video (works with no scoreboard). If a scorebug
+        # change happens to corroborate one, flag it as a bonus — but never require it.
+        corro = None
         if e.get("type") == "goal":
-            confirmed = any(abs(t - g) <= 20 for g in CONFIRMED_GOAL_TS)
-        out.append({**e, "image": _nearest_image(t), "confirmed": confirmed})
+            corro = any(abs(t - g) <= 20 for g in CONFIRMED_GOAL_TS)
+        out.append({**e, "image": _nearest_image(t), "scorebug_corroborated": corro})
     out.sort(key=lambda x: x["t_seconds"])
     # de-dup: adjacent chunks re-detect the same event — collapse same type within 4s
     deduped = []

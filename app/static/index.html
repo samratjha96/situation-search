@@ -75,8 +75,8 @@
     border:1px solid var(--line);color:var(--txt)}
   .conf{font-size:10px;color:var(--good);border:1px solid var(--good);
     padding:1px 6px;border-radius:20px}
-  .unconf{font-size:10px;color:var(--warn);border:1px solid var(--warn);
-    padding:1px 6px;border-radius:20px}
+  .cf{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .row p{color:var(--txt)}
   .plist .prow{display:flex;gap:8px;align-items:center;padding:7px 9px;border-radius:8px;
     cursor:pointer;border:1px solid transparent}
   .plist .prow:hover{background:var(--panel2);border-color:var(--line)}
@@ -157,10 +157,10 @@ function jump(t,id){
 }
 function setNow(e){
   document.getElementById('nowtc').textContent=e.timecode;
-  const conf = e.type==='goal' ? (e.confirmed?' <span class="conf">confirmed</span>':' <span class="unconf">unconfirmed</span>'):'';
-  document.getElementById('nowbadges').innerHTML=badge(e.type,color(e.type))+conf+
+  const sb = e.type==='goal'&&e.scorebug_corroborated ? ' <span class="conf">scoreboard ✓</span>':'';
+  document.getElementById('nowbadges').innerHTML=badge(e.type,color(e.type))+sb+
     (e.key_player?` <span class="pchip">${e.key_player}</span>`:'');
-  document.getElementById('nowprose').textContent=e.summary||'';
+  document.getElementById('nowprose').textContent=e.detail||e.summary||'';
 }
 
 function renderAxis(){
@@ -192,11 +192,12 @@ function renderEvents(){
       <div>
         <div class="top">
           ${badge(e.type,color(e.type))}
-          ${e.type==='goal'?(e.confirmed?'<span class="conf">confirmed</span>':'<span class="unconf">unconfirmed</span>'):''}
+          ${e.type==='goal'&&e.scorebug_corroborated?'<span class="conf">scoreboard ✓</span>':''}
           ${e.key_player?`<span class="pchip">${e.key_player}</span>`:''}
+          ${e.confidence?`<span class="cf">${Math.round(e.confidence*100)}%</span>`:''}
           <span class="tc">${e.timecode}</span>
         </div>
-        <p>${e.summary||''}</p>
+        <p>${e.detail||e.summary||''}</p>
       </div>
     </div>`).join(''):'<div class="empty">No events of these types.</div>';
   box.querySelectorAll('.row').forEach(el=>{
@@ -280,9 +281,10 @@ async function init(){
   document.getElementById('ctx').textContent=`${TL.length} events · ${mj.video}`;
   document.getElementById('tlcount').textContent=`· ${TL.length} events · ${tj.confirmed_goals} confirmed goals`;
   document.getElementById('evnote').innerHTML=
-    `Video-native detection (works with no scoreboard/commentary). Goals are marked `+
-    `<span class="conf">confirmed</span> only when the scorebug corroborates them, else `+
-    `<span class="unconf">unconfirmed</span>. Identity is best-effort (number/colour).`;
+    `Read directly from the video — works with no scoreboard or commentary. A goal is `+
+    `detected when the ball is seen entering the net (<span class="conf">scoreboard ✓</span> `+
+    `= the scoreboard also agreed). Replays & celebrations are excluded. Identity is `+
+    `best-effort (number/colour).`;
   activeTypes=new Set(NOTABLE);
   renderFilters();
   document.querySelector('#evfilters .chip[data-t="__notable"]').classList.add('on');

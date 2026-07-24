@@ -27,21 +27,25 @@ VIDEO = ROOT / "data" / "seed.mp4"
 CHUNKS = ROOT / "data" / "chunks"
 OUT = ROOT / "data" / "index.json"
 CHUNK_S = 8
-N_FRAMES = 5  # real frames sampled across each chunk (sent as images)
+N_FRAMES = 8  # real frames sampled across each chunk (sent as images)
 MODEL = "google/gemini-2.5-flash"
 
 PROMPT = (
     f"These are {N_FRAMES} frames sampled evenly across a ~{CHUNK_S}-second soccer clip "
-    f"(frame 1 = start, frame {N_FRAMES} = end). Read the MOTION across them. "
-    "Report ONLY events you can CLEARLY see in these frames. Most clips are routine "
-    "possession — if nothing notable happens, return an EMPTY events list. Do NOT assume "
-    "a shot or goal unless you actually see the ball struck at goal or entering the net; "
-    "never invent a buildup-to-goal story. Identify players ONLY by a legible jersey "
-    "NUMBER or shirt-colour + position (e.g. 'red-#9', 'blue-goalkeeper'); NEVER guess a name.\n"
-    "Return ONLY JSON with keys events and summary, where events is a list of objects with "
-    "keys: frame_index (integer 1-N), type (pass|shot|cross|dribble|tackle|duel|save|"
-    "clearance|interception|foul|goal|corner|free_kick|throw_in|out_of_play|other), "
-    "key_player, confidence_0_1."
+    f"(frame 1 = start, frame {N_FRAMES} = end). Describe what you LITERALLY see; do not infer.\n"
+    "First classify shot_type: wide_live | close_up | replay | celebration | stoppage. "
+    "If it is close_up / replay / celebration / stoppage, return an EMPTY events list "
+    "(these are not live play — do NOT infer a goal from a celebration).\n"
+    "Call it a 'goal' ONLY if you clearly SEE the ball fully cross the goal line into the "
+    "net during live play. A shot that is saved, blocked, or misses is a 'shot', not a "
+    "'goal'. Identify players ONLY by a legible jersey NUMBER or shirt-colour + position "
+    "(e.g. 'red-#9', 'blue-goalkeeper'); NEVER guess a real name.\n"
+    "For each clearly-visible on-ball event give a RICH factual detail: which players "
+    "(by number/colour) do what, and where the ball goes.\n"
+    "Return ONLY JSON with keys: shot_type, summary, and events (list of objects with keys: "
+    "frame_index 1-N, type (pass|shot|goal|cross|dribble|tackle|duel|save|clearance|"
+    "interception|foul|corner|free_kick|throw_in|other), key_player, "
+    "detail (one grounded sentence), confidence_0_1)."
 )
 
 client = OpenAI(base_url="https://openrouter.ai/api/v1",
@@ -77,16 +81,20 @@ def analyze(start):
         model=MODEL, temperature=0.0, max_tokens=6000,
         messages=[{"role": "user", "content": [{"type": "text", "text": PROMPT}] + imgs}])
     d = json.loads(repair_json(r.choices[0].message.content))
+    shot_type = (d.get("shot_type") or "wide_live").lower()
     step = CHUNK_S / (N_FRAMES - 1)
     evs = []
-    for e in d.get("events", []):
-        fi = e.get("frame_index")
-        fi = int(fi) if isinstance(fi, (int, float)) or str(fi).isdigit() else 1
-        t = start + (fi - 1) * step
-        evs.append({"t_seconds": round(t, 1), "timecode": tc(t), "type": e.get("type"),
-                    "key_player": e.get("key_player"), "confidence": e.get("confidence_0_1"),
-                    "chunk_start": start})
-    return {"start": start, "summary": d.get("summary"), "events": evs}
+    # only trust events from live play; replays/celebrations/close-ups are flagged, not mined
+    if shot_type in ("wide_live", "live"):
+        for e in d.get("events", []):
+            fi = e.get("frame_index")
+            fi = int(fi) if isinstance(fi, (int, float)) or str(fi).isdigit() else 1
+            t = start + (fi - 1) * step
+            evs.append({"t_seconds": round(t, 1), "timecode": tc(t), "type": e.get("type"),
+                        "key_player": e.get("key_player"), "detail": e.get("detail"),
+                        "confidence": e.get("confidence_0_1"), "chunk_start": start})
+    return {"start": start, "shot_type": shot_type, "scoreboard": d.get("scoreboard"),
+            "summary": d.get("summary"), "events": evs}
 
 
 def main():

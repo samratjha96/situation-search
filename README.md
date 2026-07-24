@@ -175,10 +175,13 @@ only adversarial verification against ground truth tells you if it is real.
 The UI centers on an **event timeline** built from the video-native events:
 - A minute-gridded axis with one marker per event, coloured by type (goals gold
   and tall, notable events emphasised, routine play faded), click to jump the video.
-- A filterable, chronological event list (thumbnail, type, best-effort identity,
-  timecode) — default filter "notable", toggle to any type or "all".
-- Goals are labelled **confirmed** only when the scorebug corroborates them, else
-  **unconfirmed** — the verify-don't-trust rule is visible in the UI, not hidden.
+- A filterable, chronological event list that LEADS with a rich, grounded detail
+  sentence ("red-#18 headers the crossed ball towards the bottom corner"); the
+  single-type badge is secondary, with best-effort identity and a confidence %.
+- Goals are detected from the video (ball seen entering the net) so it works with
+  no scoreboard; a "scoreboard ✓" tick is a bonus when the scorebug agrees, never
+  a requirement. Replays/celebrations are gated out (that is where phantom goals
+  came from), which cut goals from 11 to 7 without any scoreboard dependence.
 - `/api/timeline` de-dups events re-detected by adjacent chunks.
 - Two more tabs reuse earlier work: Search (semantic + keyword) and Players.
 
