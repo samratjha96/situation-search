@@ -90,7 +90,7 @@
 <body>
 <header>
   <h1>Situation Search</h1>
-  <span class="tag">soccer · local</span>
+  <span class="tag">find any match moment by describing it · runs on a laptop</span>
   <span class="ctx" id="ctx">loading…</span>
 </header>
 
@@ -108,22 +108,22 @@
 
   <div class="right card">
     <div class="tabs">
-      <div class="tab active" data-tab="events">Events</div>
-      <div class="tab" data-tab="search">Search</div>
+      <div class="tab active" data-tab="search">Search</div>
+      <div class="tab" data-tab="events">Timeline</div>
       <div class="tab" data-tab="players">Players</div>
     </div>
 
-    <div class="pane active" id="pane-events">
-      <div class="note" id="evnote"></div>
-      <div class="filters" id="evfilters"></div>
-      <div class="list" id="evlist"></div>
-    </div>
-
-    <div class="pane" id="pane-search">
-      <input id="q" type="text" placeholder="Search situations in plain English…" autocomplete="off"/>
+    <div class="pane active" id="pane-search">
+      <input id="q" type="text" placeholder="Ask this match anything — e.g. “goalkeeper diving save”" autocomplete="off"/>
       <div class="filters" id="examples" style="margin-top:11px"></div>
       <div class="note" id="srnote"></div>
       <div class="list" id="srlist"></div>
+    </div>
+
+    <div class="pane" id="pane-events">
+      <div class="note" id="evnote"></div>
+      <div class="filters" id="evfilters"></div>
+      <div class="list" id="evlist"></div>
     </div>
 
     <div class="pane" id="pane-players">
@@ -229,7 +229,7 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
 });
 
 // ---- search ----
-const EXAMPLES=["who scored","yellow card","shot on goal","corner","goalkeeper save","counter attack"];
+const EXAMPLES=["counter attack","goalkeeper diving save","shot on goal","goal celebration","corner in the box","build-up from the back"];
 let timer=null;
 async function doSearch(){
   const q=document.getElementById('q').value;
@@ -289,6 +289,9 @@ async function init(){
   renderFilters();
   document.querySelector('#evfilters .chip[data-t="__notable"]').classList.add('on');
   renderAxis(); renderEvents(); loadPlayers();
+  // land on live search results so the tool shows its value immediately
+  const q0=new URLSearchParams(location.search).get('q')||'shot on goal';
+  document.getElementById('q').value=q0; doSearch();
 }
 init();
 </script>
