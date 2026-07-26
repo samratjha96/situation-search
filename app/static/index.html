@@ -68,7 +68,13 @@
   input[type=text]{width:100%;padding:12px 14px;font-size:14px;background:var(--panel2);
     border:1px solid var(--line);border-radius:10px;color:var(--txt);outline:none}
   input:focus{border-color:var(--accent)}
-  .list{display:flex;flex-direction:column;gap:8px;max-height:64vh;overflow:auto;margin-top:10px}
+  .list{display:flex;flex-direction:column;gap:8px;max-height:64vh;overflow:auto;margin-top:10px;
+    transition:opacity .12s}
+  .list.loading{opacity:.4;pointer-events:none}
+  .spin{display:inline-block;width:11px;height:11px;border:2px solid var(--line);
+    border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite;
+    vertical-align:-1px;margin-right:6px}
+  @keyframes sp{to{transform:rotate(360deg)}}
   .row{display:grid;grid-template-columns:104px 1fr;gap:11px;padding:9px;
     border:1px solid var(--line);border-radius:10px;cursor:pointer;transition:.1s}
   .row:hover{border-color:var(--accent);background:var(--panel2)}
@@ -252,10 +258,19 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
 // ---- search ----
 const EXAMPLES=["counter attack","goalkeeper diving save","shot on goal","goal celebration","corner in the box","build-up from the back"];
 let timer=null;
+let searchSeq=0;
 async function doSearch(){
   const q=document.getElementById('q').value;
-  const j=await(await fetch(`/api/search?q=${encodeURIComponent(q)}`)).json();
   const box=document.getElementById('srlist');
+  const note=document.getElementById('srnote');
+  const seq=++searchSeq;
+  box.classList.add('loading');
+  note.innerHTML=`<span class="spin"></span>Searching…`;
+  let j;
+  try{ j=await(await fetch(`/api/search?q=${encodeURIComponent(q)}`)).json(); }
+  catch(e){ if(seq===searchSeq){ box.classList.remove('loading'); note.textContent='Search failed — is the server running?'; } return; }
+  if(seq!==searchSeq) return;            // a newer search superseded this one
+  box.classList.remove('loading');
   const maxs=Math.max(...j.results.map(r=>r.relevance||0),1e-6);
   box.innerHTML=j.results.length?j.results.map(m=>`
     <div class="row" data-t="${m.t_seconds}">
