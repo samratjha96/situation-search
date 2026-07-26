@@ -252,6 +252,24 @@ def moments():
     return JSONResponse({"moments": [public(m) for m in MOMENTS],
                          "video": data.get("video")})
 
+# When the query NAMES an event, hard-boost moments of that type so a literal
+# term like "goal" surfaces actual goals, not everything goal-adjacent.
+EVENT_SYNONYMS = {
+    "goal": ["goal", "scored", "scores", "scoring"],
+    "shot": ["shot", "shoots", "effort", "strike"],
+    "save": ["save", "saves", "parry", "parried"],
+    "corner": ["corner"], "cross": ["cross", "crossing", "crossed"],
+    "foul": ["foul", "fouled"], "tackle": ["tackle", "tackled"],
+    "yellow_card": ["yellow", "booking", "booked", "card"],
+    "red_card": ["red card", "sent off"], "penalty": ["penalty", "spot kick"],
+    "free_kick": ["free kick", "free-kick"], "duel": ["duel", "aerial"],
+    "offside": ["offside", "var"], "throw_in": ["throw in", "throw-in"],
+    "celebration": ["celebration", "celebrate", "celebrates"],
+}
+
+def target_events(ql):
+    return {ev for ev, syns in EVENT_SYNONYMS.items() if any(s in ql for s in syns)}
+
 @app.get("/api/search")
 def search(q: str = "", event: str = "", phase: str = ""):
     idx = list(range(len(MOMENTS)))
@@ -260,7 +278,9 @@ def search(q: str = "", event: str = "", phase: str = ""):
     if phase:
         idx = [i for i in idx if MOMENTS[i].get("phase") == phase]
 
-    terms = [t for t in q.lower().split() if t]
+    ql = q.lower()
+    terms = [t for t in ql.split() if t]
+    targets = target_events(ql)
     semantic_ok = False
     sims = np.zeros(len(MOMENTS), dtype=np.float32)
     if q.strip() and _dim:
@@ -275,12 +295,21 @@ def search(q: str = "", event: str = "", phase: str = ""):
     scored = []
     for i in idx:
         kw = keyword_score(MOMENTS[i], terms) if terms else 0.0
+        m = MOMENTS[i]
+        # event-intent boost: strongest when the moment's own event matches the
+        # queried event; a "goal" query also lifts the goal celebration.
+        boost = 0.0
+        if targets:
+            if m.get("event") in targets:
+                boost = 0.5
+            elif "goal" in targets and _is_named(m.get("scorer")):
+                boost = 0.3
         if not q.strip():
             score = 1.0  # pure filter / browse
         elif semantic_ok:
-            score = float(sims[i]) + 0.15 * kw
+            score = float(sims[i]) + 0.15 * kw + boost
         else:
-            score = kw
+            score = kw + boost
         scored.append((score, i))
 
     scored.sort(key=lambda x: x[0], reverse=True)

@@ -47,6 +47,12 @@
   .mk.sel{outline:2px solid #fff;z-index:3}
   .mk.goal{width:5px;transform:translateX(-2.5px)}
   .axtimes{height:14px}
+  .tip{position:fixed;z-index:60;max-width:330px;background:var(--panel2);
+    border:1px solid var(--line);border-radius:8px;padding:8px 11px;font-size:12px;
+    line-height:1.45;color:var(--txt);pointer-events:none;display:none;
+    box-shadow:0 8px 24px #000a}
+  .tip .th{font-size:10px;color:var(--muted);margin-bottom:3px;
+    text-transform:uppercase;letter-spacing:.5px}
   /* ---- tabs + lists ---- */
   .tabs{display:flex;gap:4px;padding:12px 12px 0}
   .tab{padding:8px 14px;font-size:13px;cursor:pointer;color:var(--muted);
@@ -134,6 +140,7 @@
     </div>
   </div>
 </div>
+<div class="tip" id="tip"></div>
 
 <script>
 const COLORS={goal:'var(--gold)',shot:'var(--warn)',save:'var(--purple)',
@@ -163,6 +170,19 @@ function setNow(e){
   document.getElementById('nowprose').textContent=e.detail||e.summary||'';
 }
 
+function showTip(m,e){
+  const tip=document.getElementById('tip');
+  const sb=e.type==='goal'&&e.scorebug_corroborated?' · scoreboard ✓':'';
+  tip.innerHTML=`<div class="th">${e.timecode} · ${e.type}${e.key_player?' · '+e.key_player:''}${sb}</div>${e.detail||e.summary||'(no description)'}`;
+  tip.style.display='block';
+  const r=m.getBoundingClientRect();
+  let left=Math.max(8,Math.min(window.innerWidth-tip.offsetWidth-8,r.left+r.width/2-tip.offsetWidth/2));
+  let top=r.bottom+8;
+  if(top+tip.offsetHeight>window.innerHeight-8) top=r.top-tip.offsetHeight-8;
+  tip.style.left=left+'px'; tip.style.top=top+'px';
+}
+function hideTip(){ document.getElementById('tip').style.display='none'; }
+
 function renderAxis(){
   const ax=document.getElementById('axis'); ax.innerHTML='';
   for(let mnt=0;mnt<=DUR;mnt+=60){
@@ -178,7 +198,8 @@ function renderAxis(){
     m.style.background=color(e.type);
     m.style.height=(NOTABLE.has(e.type)?66:26)+'px';
     m.style.opacity=NOTABLE.has(e.type)?0.95:0.4;
-    m.title=`${e.timecode} · ${e.type}${e.key_player?' · '+e.key_player:''}`;
+    m.onmouseenter=()=>showTip(m,e);
+    m.onmouseleave=hideTip;
     m.onclick=()=>{jump(e.t_seconds,e._id);setNow(e);};
     ax.appendChild(m);
   });
