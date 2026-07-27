@@ -271,16 +271,22 @@ async function doSearch(){
   catch(e){ if(seq===searchSeq){ box.classList.remove('loading'); note.textContent='Search failed — is the server running?'; } return; }
   if(seq!==searchSeq) return;            // a newer search superseded this one
   box.classList.remove('loading');
+  if(!j.results.length){
+    box.innerHTML=j.no_match
+      ? `<div class="empty">No moments in this clip strongly match <b>“${q}”</b>.<br><span style="font-size:12px">The tool says so rather than showing weak matches.</span></div>`
+      : `<div class="empty">No results.</div>`;
+    note.textContent = j.no_match ? 'reranked · nothing relevant' : '';
+    return;
+  }
   const maxs=Math.max(...j.results.map(r=>r.relevance||0),1e-6);
-  box.innerHTML=j.results.length?j.results.map(m=>`
+  box.innerHTML=j.results.map(m=>`
     <div class="row" data-t="${m.t_seconds}">
       <img loading="lazy" src="/media/${m.image}"/>
       <div><div class="top">${badge(m.event,color(m.event))}
         ${m.scorer?`<span class="pchip">⚽ ${m.scorer}</span>`:''}
-        <span class="tc">${m.timecode}</span></div><p>${m.prose||''}</p></div></div>`).join(''):
-    '<div class="empty">No matches.</div>';
+        <span class="tc">${m.timecode}</span></div><p>${m.prose||''}</p></div></div>`).join('');
   box.querySelectorAll('.row').forEach(el=>el.onclick=()=>jump(+el.dataset.t,null));
-  document.getElementById('srnote').textContent=(j.semantic?'semantic':'keyword')+` · ${j.results.length} results`;
+  note.textContent=`${j.ranking||'semantic'} · ${j.results.length} results`;
 }
 document.getElementById('q').addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(doSearch,280);});
 document.getElementById('examples').innerHTML=EXAMPLES.map(e=>`<span class="chip">${e}</span>`).join('');

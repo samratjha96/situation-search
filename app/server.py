@@ -13,6 +13,7 @@ from collections import Counter
 from difflib import SequenceMatcher
 from pathlib import Path
 
+import httpx
 import numpy as np
 import uvicorn
 from fastapi import FastAPI
@@ -71,6 +72,23 @@ def embed_query(text):
                                  encoding_format="float",
                                  extra_body={"input_type": "query"})
     return np.array(r.data[0].embedding, dtype=np.float32)
+
+# Cross-encoder reranker: gives a calibrated relevance score per (query, passage),
+# so we can rank precisely AND honestly say "nothing matches" below a threshold.
+RERANK_MODEL = "cohere/rerank-v3.5"
+# Calibrated on this clip: legit queries bottom out ~-2, junk/absent tops out ~-7.
+NO_MATCH_THRESHOLD = -4.0  # if the best reranked result is below this -> "nothing here"
+SHOW_GAP = 5.0             # show results within this of the best (keeps strong queries tight)
+RERANK_K = 25              # rerank the top-K cosine candidates
+
+def rerank(query, passages):
+    """Return {passage_index: relevance_score}. Raises on failure (caller falls back)."""
+    r = httpx.post("https://openrouter.ai/api/v1/rerank",
+                   headers={"Authorization": f"Bearer {_api_key()}", "Content-Type": "application/json"},
+                   json={"model": RERANK_MODEL, "query": query,
+                         "documents": passages, "top_n": len(passages)}, timeout=20)
+    r.raise_for_status()
+    return {res["index"]: float(res["relevance_score"]) for res in r.json()["results"]}
 
 def keyword_score(m, terms):
     parts = [str(m.get(k, "")) for k in
@@ -313,10 +331,31 @@ def search(q: str = "", event: str = "", phase: str = ""):
         scored.append((score, i))
 
     scored.sort(key=lambda x: x[0], reverse=True)
+
+    # Retrieve-then-rerank: rerank the top-K cosine candidates with the cross-encoder
+    # for a calibrated relevance score, and honestly report "no match" when nothing
+    # clears the bar (a bi-encoder always returns a "best" result, even for junk).
+    if q.strip():
+        cand = [i for _, i in scored[:RERANK_K]]
+        passages = [f"{MOMENTS[i].get('event', '')}. {MOMENTS[i].get('prose', '')}" for i in cand]
+        try:
+            rs = rerank(q, passages)
+            reranked = sorted(((rs.get(k, -1e9), cand[k]) for k in range(len(cand))), reverse=True)
+            best = reranked[0][0] if reranked else -1e9
+            if best < NO_MATCH_THRESHOLD:
+                return JSONResponse({"results": [], "no_match": True, "query": q,
+                                     "ranking": "reranked", "count": 0})
+            cutoff = max(NO_MATCH_THRESHOLD, best - SHOW_GAP)  # relative: keep strong queries tight
+            results = [public(MOMENTS[i], s) for s, i in reranked if s >= cutoff][:40]
+            return JSONResponse({"results": results, "ranking": "reranked", "count": len(results)})
+        except Exception:
+            pass  # reranker unavailable -> fall back to cosine ordering
+
     if q.strip() and not semantic_ok:
         scored = [(s, i) for s, i in scored if s > 0]
     results = [public(MOMENTS[i], s) for s, i in scored[:40]]
-    return JSONResponse({"results": results, "semantic": semantic_ok,
+    return JSONResponse({"results": results,
+                         "ranking": "semantic" if semantic_ok else "keyword",
                          "count": len(results)})
 
 @app.get("/")
