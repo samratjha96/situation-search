@@ -79,7 +79,8 @@ RERANK_MODEL = "cohere/rerank-v3.5"
 # Calibrated on this clip: legit queries bottom out ~-2, junk/absent tops out ~-7.
 NO_MATCH_THRESHOLD = -4.0  # if the best reranked result is below this -> "nothing here"
 SHOW_GAP = 5.0             # show results within this of the best (keeps strong queries tight)
-RERANK_K = 25              # rerank the top-K cosine candidates
+RERANK_K = 40              # rerank the top-K cosine candidates (denser index -> more)
+DEDUP_S = 6.0              # collapse adjacent same-event moments (dense 3s sampling)
 
 def rerank(query, passages):
     """Return {passage_index: relevance_score}. Raises on failure (caller falls back)."""
@@ -382,7 +383,17 @@ def search(q: str = "", event: str = "", phase: str = ""):
                 return JSONResponse({"results": [], "no_match": True, "query": q,
                                      "ranking": "reranked", "count": 0})
             cutoff = max(NO_MATCH_THRESHOLD, best - SHOW_GAP)  # relative: keep strong queries tight
-            results = [public(MOMENTS[i], s) for s, i in reranked if s >= cutoff][:40]
+            kept = []
+            for s, i in reranked:
+                if s < cutoff:
+                    continue
+                t, ev = MOMENTS[i]["t_seconds"], MOMENTS[i].get("event")
+                # dense sampling -> collapse a run of the same event into its best moment
+                if any(ev == MOMENTS[j].get("event") and abs(t - MOMENTS[j]["t_seconds"]) < DEDUP_S
+                       for _, j in kept):
+                    continue
+                kept.append((s, i))
+            results = [public(MOMENTS[i], s) for s, i in kept[:40]]
             return JSONResponse({"results": results, "ranking": "reranked", "count": len(results)})
         except Exception:
             pass  # reranker unavailable -> fall back to cosine ordering
@@ -396,7 +407,8 @@ def search(q: str = "", event: str = "", phase: str = ""):
 
 @app.get("/")
 def index():
-    return FileResponse(STATIC / "index.html")
+    # no-store so the browser never serves a stale UI after we change it
+    return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
 
 app.mount("/media", StaticFiles(directory=ROOT / "data"), name="media")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

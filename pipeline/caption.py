@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parent.parent
 FRAMES = ROOT / "data" / "frames"
 TRANSCRIPT = ROOT / "data" / "transcript" / "seed_audio.json"
 OUT = ROOT / "data" / "index.json"
-INTERVAL_S = 10
+INTERVAL_S = 3   # dense sampling so events land on the right second
 
 VLM_MODEL = "google/gemini-2.5-flash"
 OCR_MODEL = "google/gemini-2.5-flash"
