@@ -222,8 +222,9 @@ with United in a black/yellow away kit): 204 moments, 5 scorebug-confirmed goals
 correctly attributed (Timber, Mbeumo, Dorgu, Merino, Cunha), search + no-match
 threshold generalised with no per-video tuning.
 
-The server reads `OPENROUTER_API_KEY` from the environment, or falls back to the
-export in `~/.zshrc`, so query-time semantic search works.
+The server reads `OPENROUTER_URL` and `OPENROUTER_API_KEY` from the environment
+(a git-ignored `.env`), so the endpoint is never hardcoded and query-time
+semantic search works.
 
 ### Known limits / next
 

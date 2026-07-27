@@ -32,7 +32,7 @@ built on this retrieves the wrong clips.
 
 - A. Bigger local model (Gemma 3 12B / 27B). Slower, heavier, stays offline.
 - B. Offload to a strong hosted VLM on the inference endpoint
-     (`openrouter.ai/api`, OpenAI-compatible). Candidates:
+     (OpenRouter-style, OpenAI-compatible). Candidates:
      `google/gemini-2.5-pro`, `anthropic/claude-3.5-sonnet`,
      `openai/gpt-4o`. Reachable; needs `OPENROUTER_API_KEY`.
 

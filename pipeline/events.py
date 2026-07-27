@@ -26,11 +26,10 @@ from pathlib import Path
 from openai import OpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from config import OUT as INDEX, TRANSCRIPT  # noqa: E402
+from config import OUT as INDEX, TRANSCRIPT, OPENROUTER_URL, OPENROUTER_API_KEY  # noqa: E402
 EXTRACT_MODEL = "google/gemini-2.5-pro"  # reasoning model: complete + accurate
 
-client = OpenAI(base_url="https://openrouter.ai/api/v1",
-                api_key=os.environ["OPENROUTER_API_KEY"])
+client = OpenAI(base_url=OPENROUTER_URL, api_key=OPENROUTER_API_KEY)
 
 EVENT_PROMPT = (
     "You are a football analyst. Below is the FULL time-stamped commentary of a clip. "

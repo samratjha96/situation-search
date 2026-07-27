@@ -21,3 +21,8 @@ CHUNKS = DATA / "chunks"                      # video-event chunk frames
 OUT = DATA / "index.json"                     # the index the app reads
 
 INTERVAL_S = 3                                # frame sampling interval (seconds)
+
+# Inference endpoint (OpenRouter-style). The real URL + key live in .env, never
+# in the code — set OPENROUTER_URL / OPENROUTER_API_KEY in the environment.
+OPENROUTER_URL = os.environ.get("OPENROUTER_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")

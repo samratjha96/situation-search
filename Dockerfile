@@ -14,5 +14,6 @@ ARG CLIP=clip2.mp4
 COPY data/${CLIP} ./data/${CLIP}
 
 EXPOSE 8008
-# OPENROUTER_API_KEY is supplied at runtime: docker run -e OPENROUTER_API_KEY=sk-...
+# Endpoint + key are supplied at runtime: docker run --env-file .env
+# (.env sets OPENROUTER_URL and OPENROUTER_API_KEY)
 CMD ["uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "8008"]

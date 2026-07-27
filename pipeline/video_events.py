@@ -23,7 +23,7 @@ from json_repair import repair_json
 from openai import OpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from config import VIDEO, CHUNKS, OUT  # noqa: E402
+from config import VIDEO, CHUNKS, OUT, OPENROUTER_URL, OPENROUTER_API_KEY  # noqa: E402
 CHUNK_S = 8
 N_FRAMES = 8  # real frames sampled across each chunk (sent as images)
 MODEL = "google/gemini-2.5-flash"
@@ -46,8 +46,7 @@ PROMPT = (
     "detail (one grounded sentence), confidence_0_1)."
 )
 
-client = OpenAI(base_url="https://openrouter.ai/api/v1",
-                api_key=__import__("os").environ["OPENROUTER_API_KEY"])
+client = OpenAI(base_url=OPENROUTER_URL, api_key=OPENROUTER_API_KEY)
 
 
 def tc(s):

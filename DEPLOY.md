@@ -16,8 +16,15 @@ This produces `data/index.json` and leaves the clip + frames in `data/`.
 
 ## 3. Run it (key stays server-side, never exposed to viewers)
 
+Put the endpoint + key in a git-ignored `.env` next to the compose/run command:
+
+    OPENROUTER_URL=https://<endpoint>/v1
+    OPENROUTER_API_KEY=sk-...
+
+Then:
+
     docker run -d --name situation-search -p 8008:8008 \
-      -e OPENROUTER_API_KEY=sk-... situation-search
+      --env-file .env situation-search
 
 App is now at http://<host>:8008.
 
@@ -32,8 +39,8 @@ Cloudflare Tunnel is the easiest — free, gives an https://…trycloudflare.com
 
 ## Homelab vs cloud
 
-- **Homelab:** perfect — no GPU, small. Just needs outbound reach to
-  `openrouter.ai/api` and the key. Use a tunnel for the public URL.
+- **Homelab:** perfect — no GPU, small. Just needs outbound reach to the
+  inference endpoint (`OPENROUTER_URL`) and the key. Use a tunnel for the public URL.
 - **Small cloud VM** (Fly.io / Render / a $5 droplet): use if you want the demo
   always-up and independent of your home network. Same image, still no GPU.
 

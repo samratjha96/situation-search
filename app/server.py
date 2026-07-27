@@ -43,21 +43,14 @@ for i, m in enumerate(MOMENTS):
 _norms = np.linalg.norm(_mat, axis=1, keepdims=True)
 _matn = _mat / np.clip(_norms, 1e-9, None)
 
-def _api_key():
-    k = os.environ.get("OPENROUTER_API_KEY")
-    if k:
-        return k
-    # Fallback: read the export from the user's shell rc so the preview
-    # server (which starts without the env var) still gets semantic search.
-    rc = Path.home() / ".zshrc"
-    if rc.exists():
-        for line in rc.read_text().splitlines():
-            line = line.strip()
-            if line.startswith("export OPENROUTER_API_KEY="):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
-    return ""
+# Inference endpoint (OpenRouter-style) — URL + key come from the environment
+# (.env in the container), never hardcoded.
+OPENROUTER_URL = os.environ.get("OPENROUTER_URL", "https://openrouter.ai/api/v1")
 
-client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=_api_key())
+def _api_key():
+    return os.environ.get("OPENROUTER_API_KEY", "")
+
+client = OpenAI(base_url=OPENROUTER_URL, api_key=_api_key())
 
 # Public view of a moment (drop the bulky embedding vector).
 # Note: use 'relevance' for the ranking score so we don't clobber the OCR 'score'.
@@ -84,7 +77,7 @@ DEDUP_S = 6.0              # collapse adjacent same-event moments (dense 3s samp
 
 def rerank(query, passages):
     """Return {passage_index: relevance_score}. Raises on failure (caller falls back)."""
-    r = httpx.post("https://openrouter.ai/api/v1/rerank",
+    r = httpx.post(f"{OPENROUTER_URL}/rerank",
                    headers={"Authorization": f"Bearer {_api_key()}", "Content-Type": "application/json"},
                    json={"model": RERANK_MODEL, "query": query,
                          "documents": passages, "top_n": len(passages)}, timeout=20)

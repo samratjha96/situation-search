@@ -1,3 +1,6 @@
+# Secrets / local env (endpoint URL + API key)
+.env
+
 # Python
 __pycache__/
 *.pyc

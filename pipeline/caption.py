@@ -23,7 +23,7 @@ from pathlib import Path
 from openai import OpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from config import FRAMES, TRANSCRIPT, OUT, INTERVAL_S, VIDEO_NAME  # noqa: E402
+from config import FRAMES, TRANSCRIPT, OUT, INTERVAL_S, VIDEO_NAME, OPENROUTER_URL, OPENROUTER_API_KEY  # noqa: E402
 
 VLM_MODEL = "google/gemini-2.5-flash"
 OCR_MODEL = "google/gemini-2.5-flash"
@@ -69,8 +69,7 @@ PROMPT = (
     "prose (ONE factual sentence describing ONLY what is visible in the frame). No extra text."
 )
 
-client = OpenAI(base_url="https://openrouter.ai/api/v1",
-                api_key=os.environ["OPENROUTER_API_KEY"])
+client = OpenAI(base_url=OPENROUTER_URL, api_key=OPENROUTER_API_KEY)
 
 SEGS = json.loads(TRANSCRIPT.read_text())["segments"] if TRANSCRIPT.exists() else []
 

@@ -1,7 +1,9 @@
 #!/bin/zsh
-# Launch the Situation Search server with the inference endpoint key loaded,
-# so query-time semantic search works.
+# Launch the Situation Search server locally.
+# Reads the inference endpoint + key from a local .env (git-ignored):
+#   OPENROUTER_API_KEY=...
+#   OPENROUTER_URL=https://.../v1
 cd /path/to/situation-search
-eval "$(grep -E '^[[:space:]]*export[[:space:]]+OPENROUTER_API_KEY=' ~/.zshrc | head -1)"
-export OPENROUTER_API_KEY
+[ -f .env ] && set -a && source ./.env && set +a
+export OPENROUTER_URL="${OPENROUTER_URL:-https://openrouter.ai/api/v1}"
 exec uv run --with fastapi --with uvicorn --with numpy --with openai python app/server.py
