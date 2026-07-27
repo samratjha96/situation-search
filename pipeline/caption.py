@@ -42,10 +42,13 @@ EVENTS = ("goal|shot|save|foul|yellow_card|red_card|penalty|corner|free_kick|"
 # past), so it must NOT drive what the moment is or when — it only supplies names
 # for players actually visible in the frame.
 PROMPT = (
-    "You are a sports video analyst. Describe ONLY what is VISIBLE in this single "
-    "broadcast frame — the frame is the ground truth. Commentary LAGS and narrates the "
-    "past, so NEVER describe an action just because commentary mentions it; include an "
-    "action ONLY if you can actually SEE it in this frame.\n"
+    "You are a sports video analyst. You get 3 CONSECUTIVE broadcast frames (~3s apart) "
+    "of ONE moment; the MIDDLE frame is the moment. Describe ONLY what is VISIBLE across "
+    "these frames — they are the ground truth. Use the MOTION across the frames to work "
+    "out which team is IN POSSESSION and the direction of play (e.g. who plays a pass "
+    "and to whom). Commentary LAGS and narrates the past, so NEVER describe an action "
+    "just because commentary mentions it; include an action ONLY if you can actually SEE "
+    "it happen across these frames.\n"
     "You also get on-screen OCR text and (optionally) nearby commentary. Use commentary "
     "ONLY to attach a name to a player you can clearly SEE — never to decide what is "
     "happening or when.\n"
@@ -111,13 +114,11 @@ def parse_json(text: str) -> dict:
         return json.loads(repair_json(text[i:]))
 
 
-def caption(path: Path, commentary: str, ocr: str) -> dict:
+def caption(paths, commentary: str, ocr: str) -> dict:
     user = (PROMPT + f"\n\nOCR TEXT (on screen): {ocr or '(none)'}"
             f"\nCOMMENTARY (around this moment): {commentary or '(none)'}")
-    content = [
-        {"type": "text", "text": user},
-        {"type": "image_url", "image_url": {"url": img_uri(path)}},
-    ]
+    content = [{"type": "text", "text": user}] + [
+        {"type": "image_url", "image_url": {"url": img_uri(p)}} for p in paths]
     last = None
     for temp in (0.0, 0.4, 0.8):  # temp 0 is deterministic, so escalate on parse failure
         kw = dict(model=VLM_MODEL, temperature=temp, max_tokens=3500,
@@ -168,11 +169,13 @@ def player_str(p):
     return str(p)
 
 
-def build_moment(i, fp):
+def build_moment(i, frames):
+    fp = frames[i]
     t = i * INTERVAL_S
     comm = commentary_window(t)
-    ocr = ocr_text(fp)
-    cap = caption(fp, comm, ocr)
+    ocr = ocr_text(fp)  # scorebug from the moment's (middle) frame
+    burst = [frames[max(0, i - 1)], fp, frames[min(len(frames) - 1, i + 1)]]
+    cap = caption(burst, comm, ocr)
     players = [player_str(p) for p in (cap.get("players") or [])]
     prose = cap.get("prose", "")
     # embed the VISUAL description (+ visible players + on-screen text) — NOT the
@@ -181,7 +184,7 @@ def build_moment(i, fp):
     vec = embed(embed_text) if embed_text else []
     return {
         "id": i, "t_seconds": t, "timecode": timecode(t),
-        "caption_mode": "visual_first",
+        "caption_mode": "visual_first_burst",
         "image": f"frames/{fp.name}",
         "event": cap.get("event", "other"),
         "event_confidence": cap.get("event_confidence"),
@@ -212,14 +215,14 @@ def main():
     by_id = {}
     if OUT.exists():
         for m in json.loads(OUT.read_text()).get("moments", []):
-            if m.get("caption_mode") == "visual_first":  # only reuse visual-first moments
+            if m.get("caption_mode") == "visual_first_burst":  # reuse only burst moments
                 by_id[m["id"]] = m
-    todo = [(i, fp) for i, fp in enumerate(frames) if i not in by_id]
+    todo = [i for i in range(len(frames)) if i not in by_id]
     lock = threading.Lock()
     with ThreadPoolExecutor(max_workers=6) as ex:
-        futs = {ex.submit(build_moment, i, fp): (i, fp) for i, fp in todo}
+        futs = {ex.submit(build_moment, i, frames): i for i in todo}
         for fut in as_completed(futs):
-            i, fp = futs[fut]
+            i = futs[fut]
             try:
                 m = fut.result()
                 with lock:
