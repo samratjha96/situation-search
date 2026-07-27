@@ -20,13 +20,13 @@ Reads/writes data/index.json (adds a top-level "events" list).
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 from openai import OpenAI
 
-ROOT = Path(__file__).resolve().parent.parent
-INDEX = ROOT / "data" / "index.json"
-TRANSCRIPT = ROOT / "data" / "transcript" / "seed_audio.json"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from config import OUT as INDEX, TRANSCRIPT  # noqa: E402
 EXTRACT_MODEL = "google/gemini-2.5-pro"  # reasoning model: complete + accurate
 
 client = OpenAI(base_url="https://openrouter.ai/api/v1",

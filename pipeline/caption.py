@@ -22,11 +22,8 @@ from pathlib import Path
 
 from openai import OpenAI
 
-ROOT = Path(__file__).resolve().parent.parent
-FRAMES = ROOT / "data" / "frames"
-TRANSCRIPT = ROOT / "data" / "transcript" / "seed_audio.json"
-OUT = ROOT / "data" / "index.json"
-INTERVAL_S = 3   # dense sampling so events land on the right second
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from config import FRAMES, TRANSCRIPT, OUT, INTERVAL_S, VIDEO_NAME  # noqa: E402
 
 VLM_MODEL = "google/gemini-2.5-flash"
 OCR_MODEL = "google/gemini-2.5-flash"
@@ -148,11 +145,32 @@ def timecode(s: int) -> str:
 def save(moments):
     # preserve other index sections (events, video_events) built by other passes
     d = json.loads(OUT.read_text()) if OUT.exists() else {}
-    d["video"] = "seed.mp4"
+    d["video"] = VIDEO_NAME
     d["moments"] = moments
     tmp = OUT.with_suffix(".tmp")
     tmp.write_text(json.dumps(d, indent=2))
     tmp.replace(OUT)
+
+
+def score_str(s):
+    """Coerce a score field to an 'X-Y' string (the model sometimes returns a dict/other)."""
+    if isinstance(s, dict):
+        m = re.search(r"(\d+)\D+(\d+)", json.dumps(s))
+        if m:
+            return f"{m[1]}-{m[2]}"
+        h, a = s.get("home"), s.get("away")
+        return f"{h}-{a}" if h is not None and a is not None else "unknown"
+    s = str(s).strip() if s not in (None, "") else "unknown"
+    m = re.search(r"\d+\s*-\s*\d+", s)
+    return m.group(0).replace(" ", "") if m else s
+
+
+def teams_str(t):
+    """Coerce a teams field to a 'HOME vs AWAY' string."""
+    if isinstance(t, dict):
+        h, a = t.get("home"), t.get("away")
+        return f"{h} vs {a}" if h and a else "unknown"
+    return str(t) if t not in (None, "") else "unknown"
 
 
 def player_str(p):
@@ -192,8 +210,8 @@ def build_moment(i, frames):
         "zone_third": cap.get("zone_third", "unknown"),
         "zone_side": cap.get("zone_side", "unknown"),
         "pressure": cap.get("pressure", "unknown"),
-        "teams": cap.get("teams", "unknown"),
-        "score": cap.get("score", "unknown"),
+        "teams": teams_str(cap.get("teams", "unknown")),
+        "score": score_str(cap.get("score", "unknown")),
         "card": cap.get("card", "none"),
         "card_player": cap.get("card_player"),
         "players": players,

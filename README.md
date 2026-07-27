@@ -204,25 +204,23 @@ Treated as a flagship CV investment, not a quick win.
 ### Run it
 
 ```
-# 1. Extract frames + commentary audio
-ffmpeg -i data/seed.mp4 -vf "fps=1/10,scale=960:-1" data/frames/f_%04d.jpg
-ffmpeg -i data/seed.mp4 -vn -ac 1 -ar 16000 data/seed_audio.wav
+# Build the index for ANY clip (frames -> audio -> transcript -> captions ->
+# events -> video-native timeline). Nothing is hardcoded to a match.
+CLIP_VIDEO=data/clip2.mp4 python pipeline/build.py
 
-# 2. Transcribe commentary (local, optional — skip for silent footage)
-uv run --with mlx-whisper mlx_whisper data/seed_audio.wav \
-  --model mlx-community/whisper-large-v3-turbo --language en \
-  --output-format json --output-dir data/transcript
-
-# 3. Build the per-frame index (needs OPENROUTER_API_KEY; resumable, parallel)
-uv run --with openai python pipeline/caption.py
-
-# 4. Attribute events (accurate player stats): scorebug goals + commentary WHO
-uv run --with openai python pipeline/events.py
-
-# 5. Start the app
+# Start the app
 ./run_server.sh        # or: .venv/bin/python app/server.py
 # open http://127.0.0.1:8008
 ```
+
+`pipeline/config.py` is the single source of truth for paths/settings; the
+video is `CLIP_VIDEO` (default `data/seed.mp4`). Stages can also be run
+individually (`python pipeline/caption.py`, etc.) with `CLIP_VIDEO` set.
+
+Validated end-to-end on a second, unseen clip (Arsenal v Man Utd, a 2-3 game
+with United in a black/yellow away kit): 204 moments, 5 scorebug-confirmed goals
+correctly attributed (Timber, Mbeumo, Dorgu, Merino, Cunha), search + no-match
+threshold generalised with no per-video tuning.
 
 The server reads `OPENROUTER_API_KEY` from the environment, or falls back to the
 export in `~/.zshrc`, so query-time semantic search works.

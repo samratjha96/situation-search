@@ -22,10 +22,8 @@ from pathlib import Path
 from json_repair import repair_json
 from openai import OpenAI
 
-ROOT = Path(__file__).resolve().parent.parent
-VIDEO = ROOT / "data" / "seed.mp4"
-CHUNKS = ROOT / "data" / "chunks"
-OUT = ROOT / "data" / "index.json"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from config import VIDEO, CHUNKS, OUT  # noqa: E402
 CHUNK_S = 8
 N_FRAMES = 8  # real frames sampled across each chunk (sent as images)
 MODEL = "google/gemini-2.5-flash"
