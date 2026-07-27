@@ -162,9 +162,12 @@ const badge=(t,c)=>`<span class="badge" style="background:${c}22;color:${c}">${t
 
 const video=document.getElementById('video');
 let TL=[], DUR=620, MOMENTS=[], activeTypes=null, sel=null;
+// Frames are sampled on a 10s grid and captioned at the END of the play, so seek a
+// few seconds earlier to catch the build-up, not the aftermath.
+const PREROLL=8;
 
 function jump(t,id){
-  sel=id; video.currentTime=t+0.05; video.play().catch(()=>{});
+  sel=id; video.currentTime=Math.max(0, t-PREROLL); video.play().catch(()=>{});
   document.querySelectorAll('.mk').forEach(m=>m.classList.toggle('sel',m.dataset.id==id));
   document.querySelectorAll('.row').forEach(r=>r.classList.toggle('sel',r.dataset.id==id));
 }
