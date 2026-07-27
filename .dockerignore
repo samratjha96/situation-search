@@ -1,0 +1,20 @@
+# keep the serving image small — only app/ + data/index.json + frames + the clip
+.venv/
+.gitrepo/
+.git/
+runs/
+pipeline/
+spike0_vlm_captions/
+data/chunks/
+data/transcript/
+data/windows/
+data/track/
+data/eval/
+data/audio.wav
+data/seed.mp4
+data/*.tmp
+data/track
+*.log
+__pycache__/
+*.pyc
+app/static/screenshot.png
