@@ -288,6 +288,41 @@ EVENT_SYNONYMS = {
 def target_events(ql):
     return {ev for ev, syns in EVENT_SYNONYMS.items() if any(s in ql for s in syns)}
 
+# Tactical vocabulary -> the descriptive language the captions actually use.
+# Analysts search in tactical terms; captions describe what's on screen. Bridge them
+# by appending a descriptive gloss to the query before embedding/reranking.
+TACTICAL_EXPANSIONS = {
+    "high press": "winning the ball back high up the pitch, pressing and closing down the opponent near their own goal",
+    "press high": "pressing high up the pitch to win the ball near the opponent's goal",
+    "gegenpress": "immediately winning the ball back after losing it, pressing right after a turnover",
+    "counter press": "immediately winning the ball back after losing it, pressing right after a turnover",
+    "counterpress": "immediately winning the ball back after losing it, pressing right after a turnover",
+    "low block": "defending deep in a compact defensive shape near their own goal with many players behind the ball",
+    "sitting deep": "defending deep near their own goal in a compact shape",
+    "switch of play": "a long diagonal pass across to the far side, switching play to the opposite flank",
+    "switch the play": "a long diagonal pass across to the far side, switching play to the opposite flank",
+    "overload": "a numerical advantage with more attackers than defenders in a wide area",
+    "line-breaking pass": "a forward pass that splits the defense and breaks through the defensive line",
+    "line breaking": "a forward pass that splits the defense and breaks through the defensive line",
+    "through ball": "a forward pass played through the defense into space behind the defenders",
+    "build up from the back": "building play from the back, the goalkeeper and defenders passing out of their own third",
+    "build-up from the back": "building play from the back, the goalkeeper and defenders passing out of their own third",
+    "long ball": "a long ball played forward up the pitch",
+    "cutback": "a ball pulled back from the byline across the penalty area",
+    "pull back": "a ball pulled back from the byline across the penalty area",
+    "one two": "a quick one-two passing combination",
+    "give and go": "a quick one-two passing combination",
+    "wing play": "attacking down the wing near the touchline",
+    "down the wing": "attacking down the wing near the touchline",
+    "third man run": "a runner arriving from deep behind the ball",
+    "set piece": "a corner kick or free kick delivery into the box",
+}
+
+def expand_query(q):
+    ql = q.lower()
+    adds = [v for k, v in TACTICAL_EXPANSIONS.items() if k in ql]
+    return (q + ". " + ". ".join(adds)) if adds else q
+
 @app.get("/api/search")
 def search(q: str = "", event: str = "", phase: str = ""):
     idx = list(range(len(MOMENTS)))
@@ -299,11 +334,12 @@ def search(q: str = "", event: str = "", phase: str = ""):
     ql = q.lower()
     terms = [t for t in ql.split() if t]
     targets = target_events(ql)
+    q_search = expand_query(q)  # append a descriptive gloss for tactical terms
     semantic_ok = False
     sims = np.zeros(len(MOMENTS), dtype=np.float32)
     if q.strip() and _dim:
         try:
-            qv = embed_query(q)
+            qv = embed_query(q_search)
             qv = qv / max(np.linalg.norm(qv), 1e-9)
             sims = _matn @ qv
             semantic_ok = True
@@ -339,7 +375,7 @@ def search(q: str = "", event: str = "", phase: str = ""):
         cand = [i for _, i in scored[:RERANK_K]]
         passages = [f"{MOMENTS[i].get('event', '')}. {MOMENTS[i].get('prose', '')}" for i in cand]
         try:
-            rs = rerank(q, passages)
+            rs = rerank(q_search, passages)
             reranked = sorted(((rs.get(k, -1e9), cand[k]) for k in range(len(cand))), reverse=True)
             best = reranked[0][0] if reranked else -1e9
             if best < NO_MATCH_THRESHOLD:
