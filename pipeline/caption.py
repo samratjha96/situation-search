@@ -31,37 +31,42 @@ INTERVAL_S = 10
 VLM_MODEL = "google/gemini-2.5-flash"
 OCR_MODEL = "google/gemini-2.5-flash"
 EMBED_MODEL = "openai/text-embedding-3-small"
-WIN_BEFORE, WIN_AFTER = 12, 8
+WIN_BEFORE, WIN_AFTER = 5, 5  # tight: commentary is only a name hint, not the story
 
 # General sports event taxonomy (soccer).
 EVENTS = ("goal|shot|save|foul|yellow_card|red_card|penalty|corner|free_kick|"
           "throw_in|offside|tackle|duel|cross|attack|buildup|transition|"
           "celebration|substitution|injury|kickoff|out_of_play|other")
 
+# VISUAL-FIRST: the frame is the ground truth. Commentary lags (it narrates the
+# past), so it must NOT drive what the moment is or when — it only supplies names
+# for players actually visible in the frame.
 PROMPT = (
-    "You are a sports video analyst. You get ONE broadcast frame, the on-screen "
-    "TEXT read by OCR, and (optionally) the TV COMMENTARY around this moment. "
-    "Assume NOTHING about which match this is — use only what the clip shows or says.\n"
-    "GROUNDING RULES (critical):\n"
-    "- Teams and score: take from the OCR scorebug text if present, else 'unknown'.\n"
-    "- Player identity: name a player ONLY if a name appears in the OCR text (e.g. a "
-    "name graphic) OR the commentary names them, OR a jersey number is clearly legible. "
-    "Otherwise refer to the player as '#<number> <shirt colour>' or by shirt colour "
-    "alone. NEVER guess a name from general football knowledge.\n"
-    "- Set identity_source to how you got the main player's identity: "
-    "name_graphic | commentary | jersey_number | none.\n"
-    f"Classify the primary EVENT as one of: {EVENTS}.\n"
-    "Return ONLY a JSON object with keys: "
-    "event (one of the list above), event_confidence (0-1), "
+    "You are a sports video analyst. Describe ONLY what is VISIBLE in this single "
+    "broadcast frame — the frame is the ground truth. Commentary LAGS and narrates the "
+    "past, so NEVER describe an action just because commentary mentions it; include an "
+    "action ONLY if you can actually SEE it in this frame.\n"
+    "You also get on-screen OCR text and (optionally) nearby commentary. Use commentary "
+    "ONLY to attach a name to a player you can clearly SEE — never to decide what is "
+    "happening or when.\n"
+    "GROUNDING RULES:\n"
+    "- event: the primary on-ball action VISIBLE right now. If no clear action is visible "
+    "(players jogging, a wide shot, a close-up, a replay), use a truthful visible label "
+    "(buildup, transition, duel, out_of_play, ...). Do NOT import a shot / goal / switch / "
+    "save from commentary if it is not on screen.\n"
+    "- teams and score: from the OCR scorebug if present, else 'unknown'.\n"
+    "- player identity: name a player ONLY if a name is on screen (OCR graphic), a jersey "
+    "number is clearly legible, or the commentary clearly names a player you can SEE. "
+    "Otherwise use '#<number> <shirt colour>' or shirt colour. NEVER guess from football "
+    "knowledge.\n"
+    "- identity_source: name_graphic | jersey_number | commentary | none.\n"
+    f"- event is one of: {EVENTS}.\n"
+    "Return ONLY a JSON object with keys: event, event_confidence (0-1), "
     "phase (buildup|progression|final_third|transition|set_piece|out_of_play), "
     "zone_third (def_third|mid_third|att_third), zone_side (left|center|right), "
-    "pressure (none|low|medium|high), "
-    "teams (from OCR, or 'unknown'), score (from OCR scorebug, or 'unknown'), "
-    "card (none|yellow|red), card_player (name/desc or null), "
-    "players (array of grounded names or '#7 red' style descriptors, [] if none), "
-    "scorer (grounded name/desc or null), assist (grounded name/desc or null), "
-    "shot_by (grounded name/desc or null), identity_source, "
-    "prose (one factual sentence). No extra text."
+    "pressure (none|low|medium|high), teams, score, card (none|yellow|red), card_player, "
+    "players, scorer, assist, shot_by, identity_source, "
+    "prose (ONE factual sentence describing ONLY what is visible in the frame). No extra text."
 )
 
 client = OpenAI(base_url="https://openrouter.ai/api/v1",
@@ -98,8 +103,12 @@ def parse_json(text: str) -> dict:
     i = text.find("{")
     if i == -1:
         raise ValueError(f"no JSON in: {text[:120]}")
-    obj, _ = json.JSONDecoder().raw_decode(text[i:])
-    return obj
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(text[i:])
+        return obj
+    except Exception:
+        from json_repair import repair_json  # fixes truncated/malformed LLM JSON
+        return json.loads(repair_json(text[i:]))
 
 
 def caption(path: Path, commentary: str, ocr: str) -> dict:
@@ -111,7 +120,7 @@ def caption(path: Path, commentary: str, ocr: str) -> dict:
     ]
     last = None
     for temp in (0.0, 0.4, 0.8):  # temp 0 is deterministic, so escalate on parse failure
-        kw = dict(model=VLM_MODEL, temperature=temp, max_tokens=2000,
+        kw = dict(model=VLM_MODEL, temperature=temp, max_tokens=3500,
                   messages=[{"role": "user", "content": content}])
         try:
             r = client.chat.completions.create(**kw, response_format={"type": "json_object"})
@@ -136,9 +145,27 @@ def timecode(s: int) -> str:
 
 
 def save(moments):
+    # preserve other index sections (events, video_events) built by other passes
+    d = json.loads(OUT.read_text()) if OUT.exists() else {}
+    d["video"] = "seed.mp4"
+    d["moments"] = moments
     tmp = OUT.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"video": "seed.mp4", "moments": moments}, indent=2))
+    tmp.write_text(json.dumps(d, indent=2))
     tmp.replace(OUT)
+
+
+def player_str(p):
+    """Coerce a player field to a string (the model sometimes returns a dict)."""
+    if p is None:
+        return None
+    if isinstance(p, dict):
+        n = p.get("name") or p.get("desc") or p.get("player")
+        if n:
+            return str(n)
+        num = p.get("shirt_number") or p.get("number")
+        col = p.get("shirt_colour") or p.get("colour") or p.get("team")
+        return (f"#{num} {col}".strip() if (num or col) else "unknown")
+    return str(p)
 
 
 def build_moment(i, fp):
@@ -146,12 +173,15 @@ def build_moment(i, fp):
     comm = commentary_window(t)
     ocr = ocr_text(fp)
     cap = caption(fp, comm, ocr)
-    players = cap.get("players") or []
+    players = [player_str(p) for p in (cap.get("players") or [])]
     prose = cap.get("prose", "")
-    embed_text = " ".join([prose, " ".join(map(str, players)), ocr, comm]).strip()
+    # embed the VISUAL description (+ visible players + on-screen text) — NOT the
+    # commentary, so search matches what is on screen, not the narration.
+    embed_text = " ".join([prose, " ".join(map(str, players)), ocr]).strip()
     vec = embed(embed_text) if embed_text else []
     return {
         "id": i, "t_seconds": t, "timecode": timecode(t),
+        "caption_mode": "visual_first",
         "image": f"frames/{fp.name}",
         "event": cap.get("event", "other"),
         "event_confidence": cap.get("event_confidence"),
@@ -164,9 +194,9 @@ def build_moment(i, fp):
         "card": cap.get("card", "none"),
         "card_player": cap.get("card_player"),
         "players": players,
-        "scorer": cap.get("scorer"),
-        "assist": cap.get("assist"),
-        "shot_by": cap.get("shot_by"),
+        "scorer": player_str(cap.get("scorer")),
+        "assist": player_str(cap.get("assist")),
+        "shot_by": player_str(cap.get("shot_by")),
         "identity_source": cap.get("identity_source"),
         "ocr_text": ocr,
         "prose": prose,
@@ -182,7 +212,7 @@ def main():
     by_id = {}
     if OUT.exists():
         for m in json.loads(OUT.read_text()).get("moments", []):
-            if "identity_source" in m:  # only reuse moments from THIS schema
+            if m.get("caption_mode") == "visual_first":  # only reuse visual-first moments
                 by_id[m["id"]] = m
     todo = [(i, fp) for i, fp in enumerate(frames) if i not in by_id]
     lock = threading.Lock()
