@@ -28,3 +28,6 @@ runs/
 *.db
 *.sqlite
 sidecars/
+
+# Local tooling
+.claude/

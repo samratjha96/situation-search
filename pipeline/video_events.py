@@ -1,9 +1,9 @@
 """Video-native event detection — works on ANY footage (incl. training clips).
 
-IMPORTANT: this gateway (OpenAI-compatible proxy) silently DROPS video sent via
-video_url — Gemini then confabulates a generic "buildup->shot->goal" from priors
-(verified: it invented scorelines and player names). So we send a BURST of real
-sampled frames as images (which the gateway does process) and let the model read
+IMPORTANT: the inference endpoint (OpenAI-compatible) silently DROPS video sent
+via video_url — the model then confabulates a generic "buildup->shot->goal" from
+priors (verified: it invented scorelines and player names). So we send a BURST of
+real sampled frames as images (which it does process) and let the model read
 the motion across them. A calibrated prompt lets it answer "nothing notable" and
 forbids assuming a shot/goal. Identity is best-effort: jersey number or
 shirt-colour + position, never a guessed name.
@@ -23,7 +23,8 @@ from json_repair import repair_json
 from openai import OpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from config import VIDEO, CHUNKS, OUT, OPENROUTER_URL, OPENROUTER_API_KEY  # noqa: E402
+from config import CHUNKS, OPENROUTER_API_KEY, OPENROUTER_URL, OUT, VIDEO
+
 CHUNK_S = 8
 N_FRAMES = 8  # real frames sampled across each chunk (sent as images)
 MODEL = "google/gemini-2.5-flash"

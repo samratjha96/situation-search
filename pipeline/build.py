@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import config as cfg  # noqa: E402
+import config as cfg
 
 PIPE = Path(__file__).resolve().parent
 

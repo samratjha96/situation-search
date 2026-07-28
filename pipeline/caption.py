@@ -15,7 +15,6 @@ Output: data/index.json
 """
 import base64
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -23,7 +22,15 @@ from pathlib import Path
 from openai import OpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from config import FRAMES, TRANSCRIPT, OUT, INTERVAL_S, VIDEO_NAME, OPENROUTER_URL, OPENROUTER_API_KEY  # noqa: E402
+from config import (
+    FRAMES,
+    INTERVAL_S,
+    OPENROUTER_API_KEY,
+    OPENROUTER_URL,
+    OUT,
+    TRANSCRIPT,
+    VIDEO_NAME,
+)
 
 VLM_MODEL = "google/gemini-2.5-flash"
 OCR_MODEL = "google/gemini-2.5-flash"
@@ -226,8 +233,8 @@ def build_moment(i, frames):
 
 
 def main():
-    from concurrent.futures import ThreadPoolExecutor, as_completed
     import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     frames = sorted(FRAMES.glob("*.jpg"))
     by_id = {}
     if OUT.exists():
@@ -246,7 +253,7 @@ def main():
                     by_id[i] = m
                     save([by_id[k] for k in sorted(by_id)])
                 who = m["scorer"] or m["shot_by"] or (m["players"][0] if m["players"] else "")
-                print(f"[{len(by_id)}/{len(frames)}] {m['timecode']}  {m['event']:<12} {str(who):<16} {m['prose'][:46]}", flush=True)
+                print(f"[{len(by_id)}/{len(frames)}] {m['timecode']}  {m['event']:<12} {who!s:<16} {m['prose'][:46]}", flush=True)
             except Exception as e:
                 print(f"[frame {i}] FAILED: {e}", file=sys.stderr, flush=True)
     print(f"\nWrote {len(by_id)} moments -> {OUT}")

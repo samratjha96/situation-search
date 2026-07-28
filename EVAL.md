@@ -6,9 +6,10 @@ broadcast (NOT AI-generated). Final score 2-0; extra goals were VAR-disallowed.
 
 ## Goals — the key correction
 
-First pass used the scorebug ("goals that COUNT") as truth and scored precision
-at 29%. That was the WRONG yardstick: the spec is "detect the ball entering the
-net", and **a VAR-disallowed goal is still a real ball-in-net event.**
+The first pass used the scorebug ("goals that count") as truth and scored
+precision at 29%. That was the wrong measure. The specification is "detect the
+ball that enters the net". **A VAR-disallowed goal is still a real ball-in-net
+event.**
 
 Re-reviewing the 7 detected goals frame-by-frame:
 
@@ -50,13 +51,14 @@ Good:
 - **Ball-in-net detection is strong** (~85%), including VAR-disallowed goals.
 
 Bad:
-- **Fine type precision is soft** — shot vs cross vs save vs scramble blur (same
-  root cause as the earlier "cross" over-labelling). It reliably says "notable
-  action near goal", less reliably which exact action.
-- **Referee events missed** — cards (0/1) and fouls-as-fouls (0/1). A ref
-  brandishing a card / awarding a foul is a brief, specific cue that 8-frame
-  sampling skips.
-- **Corners under-detected** (1 of 2+).
+- **Fine type precision is limited.** The model finds it hard to separate a shot,
+  a cross, a save, and a scramble. This is the same cause as the earlier over-use
+  of "cross". The model reliably reports a notable action near goal. It less
+  reliably reports the exact action.
+- **Referee events are missed** — cards (0/1) and fouls-as-fouls (0/1). A referee
+  who shows a card or gives a foul is a short, specific event. The 8-frame
+  sampling misses it.
+- **Corners are under-detected** (1 of 2+).
 
 ## What would fix each (without a scoreboard)
 

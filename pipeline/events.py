@@ -18,7 +18,6 @@ commentary goals; no commentary -> score-change goals with no name.
 Reads/writes data/index.json (adds a top-level "events" list).
 """
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -26,7 +25,9 @@ from pathlib import Path
 from openai import OpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from config import OUT as INDEX, TRANSCRIPT, OPENROUTER_URL, OPENROUTER_API_KEY  # noqa: E402
+from config import OPENROUTER_API_KEY, OPENROUTER_URL, TRANSCRIPT
+from config import OUT as INDEX
+
 EXTRACT_MODEL = "google/gemini-2.5-pro"  # reasoning model: complete + accurate
 
 client = OpenAI(base_url=OPENROUTER_URL, api_key=OPENROUTER_API_KEY)
@@ -165,7 +166,7 @@ def main():
     for e in events:
         extra = f" (assist {e['assist']})" if e.get("assist") else ""
         conf = "" if e["confirmed"] is None else (" [confirmed]" if e["confirmed"] else " [unconfirmed]")
-        print(f"  {e['timecode']}  {e['type']:<13} {str(e['player']):<20}{extra}{conf}")
+        print(f"  {e['timecode']}  {e['type']:<13} {e['player']!s:<20}{extra}{conf}")
 
 
 if __name__ == "__main__":

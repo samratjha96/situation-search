@@ -1,10 +1,18 @@
-"""Situation Search backend.
+"""Situation Search backend — natural-language search over captioned match moments.
 
-Serves the analyst UI and a hybrid (semantic + keyword) search over the
-captioned 'moments' index. Semantic search embeds the query on the the
-gateway and ranks moments by cosine similarity to their caption embeddings;
-keyword matches on the structured fields boost the score. Falls back to
-keyword-only if the embedding call fails, so the app still works offline.
+Serves the analyst UI and a search API over the offline-built 'moments' index
+(one captioned frame-burst every few seconds). A query flows through three steps:
+
+  1. expand   — tactical phrases ("switch of play") get a plain-language gloss so
+                 they match the descriptive captions.
+  2. retrieve  — embed the query and rank moments by cosine similarity.
+  3. rerank    — score the top-K candidates with a cross-encoder; anything below a
+                 tuned threshold returns an honest "no match" instead of a
+                 bi-encoder's always-present best guess.
+
+Also exposes per-player highlights and a video-native event timeline. Embedding
+and reranking run on an OpenRouter-style endpoint (URL + key from the env); if it
+is unreachable, search degrades to keyword-only so the app still works.
 """
 import json
 import os
@@ -46,11 +54,9 @@ _matn = _mat / np.clip(_norms, 1e-9, None)
 # Inference endpoint (OpenRouter-style) — URL + key come from the environment
 # (.env in the container), never hardcoded.
 OPENROUTER_URL = os.environ.get("OPENROUTER_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 
-def _api_key():
-    return os.environ.get("OPENROUTER_API_KEY", "")
-
-client = OpenAI(base_url=OPENROUTER_URL, api_key=_api_key())
+client = OpenAI(base_url=OPENROUTER_URL, api_key=OPENROUTER_KEY)
 
 # Public view of a moment (drop the bulky embedding vector).
 # Note: use 'relevance' for the ranking score so we don't clobber the OCR 'score'.
@@ -78,7 +84,7 @@ DEDUP_S = 6.0              # collapse adjacent same-event moments (dense 3s samp
 def rerank(query, passages):
     """Return {passage_index: relevance_score}. Raises on failure (caller falls back)."""
     r = httpx.post(f"{OPENROUTER_URL}/rerank",
-                   headers={"Authorization": f"Bearer {_api_key()}", "Content-Type": "application/json"},
+                   headers={"Authorization": f"Bearer {OPENROUTER_KEY}", "Content-Type": "application/json"},
                    json={"model": RERANK_MODEL, "query": query,
                          "documents": passages, "top_n": len(passages)}, timeout=20)
     r.raise_for_status()
