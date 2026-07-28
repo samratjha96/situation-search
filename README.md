@@ -128,17 +128,14 @@ scorebug-confirmed goals with correct names (Timber, Mbeumo, Dorgu, Merino,
 Cunha). The search and the no-match threshold worked with no per-clip changes. See
 `EVAL.md`.
 
-## Limits and next steps
+## Limitations
 
-- The seed clip is a copyrighted highlight reel. This is acceptable for a demo. A
-  public build needs open or licensed footage (for example SoccerNet).
-- Highlights are close-ups. They are good for events, but weak for full tactical
-  geometry. The next retrieval mode is a tracking-geometry layer (player positions
-  across a window) for spatial queries.
-- Player statistics include the attribution errors on replay or celebration
+- The demo footage is a copyrighted highlight reel. This is acceptable for a demo.
+  A public build needs open or licensed footage (for example SoccerNet).
+- Broadcast highlights are close-ups. They are strong for events, but weak for
+  full-pitch tactical geometry.
+- Player statistics inherit the attribution errors on replay and celebration
   frames.
-- The frontend is vanilla JS. A rebuild in Vite, React, and TypeScript is the next
-  step for production.
 
 ## Stack
 
