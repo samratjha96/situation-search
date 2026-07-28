@@ -26,3 +26,12 @@ INTERVAL_S = 3                                # frame sampling interval (seconds
 # in the code — set OPENROUTER_URL / OPENROUTER_API_KEY in the environment.
 OPENROUTER_URL = os.environ.get("OPENROUTER_URL", "https://openrouter.ai/api/v1")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+
+# Model routes also come from the environment, so no provider-specific model ids
+# are committed. The defaults are OpenRouter-style placeholders — set the real
+# routes for your endpoint in .env (see .env.example).
+VLM_MODEL = os.environ.get("VLM_MODEL", "google/gemini-2.5-flash")        # captions + video events
+REASON_MODEL = os.environ.get("REASON_MODEL", "google/gemini-2.5-pro")    # event reasoning
+OCR_MODEL = os.environ.get("OCR_MODEL", "google/gemini-2.5-flash")        # scorebug OCR
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "openai/text-embedding-3-small")
+RERANK_MODEL = os.environ.get("RERANK_MODEL", "cohere/rerank-v3.5")

@@ -23,11 +23,11 @@ from json_repair import repair_json
 from openai import OpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from config import CHUNKS, OPENROUTER_API_KEY, OPENROUTER_URL, OUT, VIDEO
+from config import CHUNKS, OPENROUTER_API_KEY, OPENROUTER_URL, OUT, VIDEO, VLM_MODEL
 
 CHUNK_S = 8
 N_FRAMES = 8  # real frames sampled across each chunk (sent as images)
-MODEL = "google/gemini-2.5-flash"
+MODEL = VLM_MODEL
 
 PROMPT = (
     f"These are {N_FRAMES} frames sampled evenly across a ~{CHUNK_S}-second soccer clip "

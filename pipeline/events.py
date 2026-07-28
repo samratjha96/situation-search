@@ -25,10 +25,10 @@ from pathlib import Path
 from openai import OpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from config import OPENROUTER_API_KEY, OPENROUTER_URL, TRANSCRIPT
+from config import OPENROUTER_API_KEY, OPENROUTER_URL, REASON_MODEL, TRANSCRIPT
 from config import OUT as INDEX
 
-EXTRACT_MODEL = "google/gemini-2.5-pro"  # reasoning model: complete + accurate
+EXTRACT_MODEL = REASON_MODEL  # reasoning model: complete + accurate
 
 client = OpenAI(base_url=OPENROUTER_URL, api_key=OPENROUTER_API_KEY)
 

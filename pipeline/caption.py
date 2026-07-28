@@ -23,18 +23,18 @@ from openai import OpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import (
+    EMBED_MODEL,
     FRAMES,
     INTERVAL_S,
+    OCR_MODEL,
     OPENROUTER_API_KEY,
     OPENROUTER_URL,
     OUT,
     TRANSCRIPT,
     VIDEO_NAME,
+    VLM_MODEL,
 )
 
-VLM_MODEL = "google/gemini-2.5-flash"
-OCR_MODEL = "google/gemini-2.5-flash"
-EMBED_MODEL = "openai/text-embedding-3-small"
 WIN_BEFORE, WIN_AFTER = 5, 5  # tight: commentary is only a name hint, not the story
 
 # General sports event taxonomy (soccer).

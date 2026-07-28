@@ -104,12 +104,15 @@ For the Docker build (no GPU) and public hosting, see `DEPLOY.md`.
 
 ## Models
 
-| Role | Model | Where |
-|------|-------|-------|
-| VLM captions / video events | Gemini 3.5 Flash | endpoint |
-| Event reasoning | Gemini 3.1 Pro | endpoint |
-| Scorebug OCR | PaddleOCR-VL | endpoint |
-| Query embedding | a 1B embedding model | endpoint |
+Model routes come from the environment (see `.env.example`), so you can point each
+role at any OpenRouter-compatible model.
+
+| Role | Model class | Where |
+|------|-------------|-------|
+| VLM captions / video events | a fast vision-language model | endpoint |
+| Event reasoning | a strong reasoning model | endpoint |
+| Scorebug OCR | an OCR vision model | endpoint |
+| Query embedding | a 1B text-embedding model | endpoint |
 | Reranker | a cross-encoder reranker | endpoint |
 | Commentary ASR | Whisper large-v3-turbo | local (MLX) |
 

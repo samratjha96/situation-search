@@ -32,7 +32,7 @@ from openai import OpenAI
 ROOT = Path(__file__).resolve().parent.parent
 INDEX = ROOT / "data" / "index.json"
 STATIC = ROOT / "app" / "static"
-EMBED_MODEL = "openai/text-embedding-3-small"
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "openai/text-embedding-3-small")
 
 data = json.loads(INDEX.read_text())
 MOMENTS = data["moments"]
@@ -74,7 +74,7 @@ def embed_query(text):
 
 # Cross-encoder reranker: gives a calibrated relevance score per (query, passage),
 # so we can rank precisely AND honestly say "nothing matches" below a threshold.
-RERANK_MODEL = "cohere/rerank-v3.5"
+RERANK_MODEL = os.environ.get("RERANK_MODEL", "cohere/rerank-v3.5")
 # Calibrated on this clip: legit queries bottom out ~-2, junk/absent tops out ~-7.
 NO_MATCH_THRESHOLD = -4.0  # if the best reranked result is below this -> "nothing here"
 SHOW_GAP = 5.0             # show results within this of the best (keeps strong queries tight)
