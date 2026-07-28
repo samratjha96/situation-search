@@ -15,6 +15,7 @@ data/
 *.jpeg
 *.png
 !spike0_vlm_captions/frames/.gitkeep
+!docs/architecture.png
 
 # Models
 *.gguf

@@ -1,13 +1,15 @@
 # Situation Search
 
-Natural-language search over match video. An analyst types what they want to see
-— "switch of play", "goalkeeper save", "build-up from the back". The app then
-goes to that moment in the clip. If no moment matches, the app tells the analyst.
-It does not guess.
+A football analyst spends hours scrubbing match video to find one moment.
+Situation Search removes the scrubbing. The analyst types what they want to see —
+"switch of play", "goalkeeper save", "build-up from the back" — and the app goes
+to that moment in the clip. If no moment matches, the app says so. It does not
+guess.
 
-This is a portfolio piece for an applied football-analytics role. It follows the
-work of Karun Singh. You can run it on a laptop. You can deploy it as a small web
-server with no GPU.
+The demo runs on two public football highlight reels:
+[Manchester United v Manchester City](https://www.youtube.com/watch?v=mHcRPO21qlE)
+(seed) and [Arsenal v Manchester United](https://www.youtube.com/watch?v=8I4Vov6p1jI)
+(a second, unseen clip for validation).
 
 ## What it does
 
@@ -25,6 +27,8 @@ server with no GPU.
   also on footage with no scoreboard and no commentary.
 
 ## How it works
+
+![Situation Search architecture](docs/architecture.png)
 
 There are two phases. Indexing runs one time for each clip, offline. Search runs
 live, for each query. All heavy AI runs on an OpenRouter-style inference endpoint.
@@ -105,15 +109,15 @@ For the Docker build (no GPU) and public hosting, see `DEPLOY.md`.
 ## Models
 
 Model routes come from the environment (see `.env.example`), so you can point each
-role at any OpenRouter-compatible model.
+role at any OpenRouter-compatible model. The demo uses:
 
-| Role | Model class | Where |
-|------|-------------|-------|
-| VLM captions / video events | a fast vision-language model | endpoint |
-| Event reasoning | a strong reasoning model | endpoint |
-| Scorebug OCR | an OCR vision model | endpoint |
-| Query embedding | a 1B text-embedding model | endpoint |
-| Reranker | a cross-encoder reranker | endpoint |
+| Role | Model | Where |
+|------|-------|-------|
+| Captioning / video events | Gemini 3.5 Flash | endpoint |
+| Event reasoning | Gemini 3.1 Pro | endpoint |
+| Score OCR (reads the scorebug) | PaddleOCR-VL | endpoint |
+| Query + moment embeddings | NV-EmbedQA 1B | endpoint |
+| Reranker | NV-RerankQA 1B | endpoint |
 | Commentary ASR | Whisper large-v3-turbo | local (MLX) |
 
 ## Validation
