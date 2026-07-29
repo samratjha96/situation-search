@@ -1,5 +1,7 @@
 # Situation Search
 
+**Live demo:** https://situsearch.bootloop.cc
+
 A football analyst spends hours scrubbing match video to find one moment.
 Situation Search removes the scrubbing. The analyst types what they want to see —
 "switch of play", "goalkeeper save", "build-up from the back" — and the app goes
