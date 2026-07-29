@@ -27,6 +27,8 @@ The demo runs on two public football highlight reels:
   them by event importance.
 - **Event timeline.** A video-native event track (goals, shots, saves). It works
   also on footage with no scoreboard and no commentary.
+- **Two matches.** Pick a clip from the header dropdown. Each match has its own
+  index, timeline, and players, and everything reloads for the chosen clip.
 
 ## How it works
 
