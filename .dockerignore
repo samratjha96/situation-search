@@ -1,4 +1,4 @@
-# keep the serving image small — only app/ + data/index.json + frames + the clip
+# keep the serving image small — only app/ + data/clips/ (per-clip index, frames, video)
 .venv/
 .gitrepo/
 .git/

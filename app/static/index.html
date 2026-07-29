@@ -19,7 +19,12 @@
   header h1{margin:0;font-size:17px;letter-spacing:.2px}
   header .tag{font-size:11px;color:var(--muted);border:1px solid var(--line);
     padding:2px 8px;border-radius:20px}
-  header .ctx{margin-left:auto;font-size:12px;color:var(--muted)}
+  header .hright{margin-left:auto;display:flex;align-items:center;gap:12px}
+  header .clipwrap{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px}
+  header select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+    border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;outline:none}
+  header select:focus{border-color:var(--accent)}
+  header .ctx{font-size:12px;color:var(--muted)}
   .wrap{display:grid;grid-template-columns:minmax(430px,1fr) minmax(430px,1fr);
     gap:18px;padding:18px;max-width:1440px;margin:0 auto}
   @media(max-width:920px){.wrap{grid-template-columns:1fr}}
@@ -103,7 +108,10 @@
 <header>
   <h1>Situation Search</h1>
   <span class="tag">find any match moment by describing it · runs on a laptop</span>
-  <span class="ctx" id="ctx">loading…</span>
+  <div class="hright">
+    <label class="clipwrap">Clip <select id="clipsel"></select></label>
+    <span class="ctx" id="ctx">loading…</span>
+  </div>
 </header>
 
 <div class="wrap">
@@ -161,7 +169,8 @@ const NOTABLE=new Set(['goal','shot','save','penalty','foul','yellow_card','red_
 const badge=(t,c)=>`<span class="badge" style="background:${c}22;color:${c}">${t}</span>`;
 
 const video=document.getElementById('video');
-let TL=[], DUR=620, MOMENTS=[], activeTypes=null, sel=null;
+let TL=[], DUR=620, MOMENTS=[], activeTypes=null, sel=null, CLIP='';
+const withClip=q=>`${q}${q.includes('?')?'&':'?'}clip=${encodeURIComponent(CLIP)}`;
 // Frames are sampled on a 10s grid and captioned at the END of the play, so seek a
 // few seconds earlier to catch the build-up, not the aftermath.
 const PREROLL=8;
@@ -270,7 +279,7 @@ async function doSearch(){
   box.classList.add('loading');
   note.innerHTML=`<span class="spin"></span>Searching…`;
   let j;
-  try{ j=await(await fetch(`/api/search?q=${encodeURIComponent(q)}`)).json(); }
+  try{ j=await(await fetch(withClip(`/api/search?q=${encodeURIComponent(q)}`))).json(); }
   catch(e){ if(seq===searchSeq){ box.classList.remove('loading'); note.textContent='Search failed — is the server running?'; } return; }
   if(seq!==searchSeq) return;            // a newer search superseded this one
   box.classList.remove('loading');
@@ -297,7 +306,7 @@ document.querySelectorAll('#examples .chip').forEach(c=>c.onclick=()=>{document.
 
 // ---- players ----
 async function loadPlayers(){
-  const j=await(await fetch('/api/players')).json();
+  const j=await(await fetch(withClip('/api/players'))).json();
   document.getElementById('plist').innerHTML=j.players.map(p=>{
     const st=[p.goals?`<span class="g">⚽${p.goals}</span>`:'',p.assists?`🅰${p.assists}`:'',
       p.shots?`Sh${p.shots}`:'',p.cards?`🟨${p.cards}`:''].filter(Boolean).join(' ')||`${p.appearances} moments`;
@@ -307,7 +316,7 @@ async function loadPlayers(){
 }
 async function selectPlayer(name,el){
   document.querySelectorAll('#plist .prow').forEach(x=>x.classList.toggle('sel',x===el));
-  const j=await(await fetch(`/api/player?name=${encodeURIComponent(name)}`)).json();
+  const j=await(await fetch(withClip(`/api/player?name=${encodeURIComponent(name)}`))).json();
   const s=j.stats;
   document.getElementById('prnote').innerHTML=`<b>${name}</b> — ${s.goals}G ${s.assists}A ${s.shots}Sh ${s.cards}C · ${s.appearances} moments`;
   const box=document.getElementById('prlist');
@@ -318,12 +327,20 @@ async function selectPlayer(name,el){
   box.querySelectorAll('.row').forEach(x=>x.onclick=()=>jump(+x.dataset.t,null));
 }
 
-async function init(){
-  const mj=await(await fetch('/api/moments')).json();
+async function loadClips(){
+  const j=await(await fetch('/api/clips')).json();
+  const el=document.getElementById('clipsel');
+  el.innerHTML=(j.clips||[]).map(c=>`<option value="${c.name}">${c.label}</option>`).join('');
+  CLIP=j.default||((j.clips||[])[0]||{}).name||'';
+  el.value=CLIP;
+  el.onchange=()=>{ if(el.value!==CLIP){ CLIP=el.value; switchClip(); } };
+}
+async function loadClip(){
+  const mj=await(await fetch(withClip('/api/moments'))).json();
   MOMENTS=mj.moments; video.src=`/media/${mj.video}`;
-  const tj=await(await fetch('/api/timeline')).json();
+  const tj=await(await fetch(withClip('/api/timeline'))).json();
   TL=tj.events.map((e,i)=>({...e,_id:i})); DUR=tj.duration;
-  document.getElementById('ctx').textContent=`${TL.length} events · ${mj.video}`;
+  document.getElementById('ctx').textContent=`${TL.length} events`;
   document.getElementById('tlcount').textContent=`· ${TL.length} events · ${tj.confirmed_goals} confirmed goals`;
   document.getElementById('evnote').innerHTML=
     `Read directly from the video — works with no scoreboard or commentary. A goal is `+
@@ -338,6 +355,18 @@ async function init(){
   const q0=new URLSearchParams(location.search).get('q')||'shot on goal';
   document.getElementById('q').value=q0; doSearch();
 }
+function switchClip(){
+  // reset per-clip UI state, then reload everything for the newly-selected clip
+  sel=null; TL=[]; MOMENTS=[]; activeTypes=null;
+  document.getElementById('prnote').innerHTML='';
+  document.getElementById('prlist').innerHTML='';
+  document.getElementById('plist').innerHTML='';
+  document.getElementById('nowprose').textContent='Click any event to jump the video.';
+  document.getElementById('nowbadges').innerHTML='';
+  document.getElementById('nowtc').textContent='00:00';
+  loadClip();
+}
+async function init(){ await loadClips(); loadClip(); }
 init();
 </script>
 </body>

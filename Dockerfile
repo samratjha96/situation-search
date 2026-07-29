@@ -5,13 +5,9 @@ FROM python:3.12-slim
 WORKDIR /app
 RUN pip install --no-cache-dir fastapi uvicorn "numpy<2.3" openai httpx
 
-# app code + the built index (index.json, the clip, and frame thumbnails)
+# app code + the built per-clip indexes (each clip has index.json, frames, video)
 COPY app/ ./app/
-COPY data/index.json ./data/index.json
-COPY data/frames/ ./data/frames/
-# the video the index points to (build arg lets you pick which clip to ship)
-ARG CLIP=clip2.mp4
-COPY data/${CLIP} ./data/${CLIP}
+COPY data/clips/ ./data/clips/
 
 EXPOSE 8008
 # Endpoint + key are supplied at runtime: docker run --env-file .env
