@@ -26,7 +26,7 @@ from pathlib import Path
 import httpx
 import numpy as np
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
@@ -42,9 +42,10 @@ EMBED_MODEL = os.environ.get("EMBED_MODEL", "openai/text-embedding-3-small")
 RERANK_MODEL = os.environ.get("RERANK_MODEL", "cohere/rerank-v3.5")
 client = OpenAI(base_url=OPENROUTER_URL, api_key=OPENROUTER_KEY)
 
-# Calibrated on these clips: legit queries bottom out ~-2, junk/absent tops out ~-7.
-NO_MATCH_THRESHOLD = -4.0  # if the best reranked result is below this -> "nothing here"
-SHOW_GAP = 5.0             # show results within this of the best (keeps strong queries tight)
+# Calibrated on these clips with NV-RerankQA 1B logits: legit queries bottom out ~-2,
+# junk/absent tops out ~-7. A reranker with another score scale (e.g. 0-1) needs its own.
+NO_MATCH_THRESHOLD = float(os.environ.get("NO_MATCH_THRESHOLD", "-4.0"))  # best below this -> "nothing here"
+SHOW_GAP = float(os.environ.get("SHOW_GAP", "5.0"))  # show results within this of the best
 RERANK_K = 40              # rerank the top-K cosine candidates
 DEDUP_S = 6.0              # collapse adjacent same-event moments (dense 3s sampling)
 
@@ -82,9 +83,10 @@ def _similar(a, b):
     a, b = a.lower(), b.lower()
     if SequenceMatcher(None, a, b).ratio() >= 0.85:
         return True
-    ta = {w for w in a.split() if len(w) >= 4}
-    tb = {w for w in b.split() if len(w) >= 4}
-    return bool(ta & tb)  # shared surname-length token
+    # same surname, allowing ASR/OCR misspellings ("Mbeumo" ~ "Bryan Mbuemo");
+    # a shared first name alone ("Gabriel ...") is not the same player
+    sa, sb = a.split()[-1], b.split()[-1]
+    return min(len(sa), len(sb)) >= 4 and SequenceMatcher(None, sa, sb).ratio() >= 0.85
 
 
 def public(m, relevance=None):
@@ -212,7 +214,10 @@ DEFAULT_CLIP = CLIP_ORDER[0] if CLIP_ORDER else None
 
 
 def get_clip(name):
-    return CLIPS.get(name) or (CLIPS.get(DEFAULT_CLIP) if DEFAULT_CLIP else None)
+    c = CLIPS.get(name) or CLIPS.get(DEFAULT_CLIP)
+    if c is None:
+        raise HTTPException(404, "No clip index loaded (expected data/clips/<name>/index.json)")
+    return c
 
 
 # ---- search helpers (clip-independent) -------------------------------------
@@ -233,6 +238,18 @@ def rerank(query, passages):
     return {res["index"]: float(res["relevance_score"]) for res in r.json()["results"]}
 
 
+def _has_phrase(text, phrase):
+    """Whole-word match with plural/-ing forms: "goals" hits goal, "goalkeeper" does not."""
+    return re.search(rf"\b{re.escape(phrase)}(?:s|es|ing)?\b", text) is not None
+
+
+def _passage(m):
+    """Reranker input: what is on screen plus who is named (prose often only says '#10')."""
+    names = sorted(_mentions(m))
+    who = f" Players: {', '.join(names)}." if names else ""
+    return f"{m.get('event', '')}. {m.get('prose', '')}{who}"
+
+
 def keyword_score(m, terms):
     parts = [str(m.get(k, "")) for k in
              ("prose", "event", "phase", "zone_third", "zone_side", "pressure",
@@ -240,7 +257,7 @@ def keyword_score(m, terms):
               "shot_by", "ocr_text", "commentary")]
     parts += m.get("players", []) or []
     hay = " ".join(parts).lower()
-    return sum(1.0 for t in terms if t in hay)
+    return sum(1.0 for t in terms if _has_phrase(hay, t))
 
 
 # When the query NAMES an event, hard-boost moments of that type so a literal
@@ -251,7 +268,7 @@ EVENT_SYNONYMS = {
     "save": ["save", "saves", "parry", "parried"],
     "corner": ["corner"], "cross": ["cross", "crossing", "crossed"],
     "foul": ["foul", "fouled"], "tackle": ["tackle", "tackled"],
-    "yellow_card": ["yellow", "booking", "booked", "card"],
+    "yellow_card": ["yellow", "booking", "booked"],
     "red_card": ["red card", "sent off"], "penalty": ["penalty", "spot kick"],
     "free_kick": ["free kick", "free-kick"], "duel": ["duel", "aerial"],
     "offside": ["offside", "var"], "throw_in": ["throw in", "throw-in"],
@@ -260,7 +277,7 @@ EVENT_SYNONYMS = {
 
 
 def target_events(ql):
-    return {ev for ev, syns in EVENT_SYNONYMS.items() if any(s in ql for s in syns)}
+    return {ev for ev, syns in EVENT_SYNONYMS.items() if any(_has_phrase(ql, s) for s in syns)}
 
 
 # Tactical vocabulary -> the descriptive language the captions actually use.
@@ -296,7 +313,7 @@ TACTICAL_EXPANSIONS = {
 
 def expand_query(q):
     ql = q.lower()
-    adds = [v for k, v in TACTICAL_EXPANSIONS.items() if k in ql]
+    adds = [v for k, v in TACTICAL_EXPANSIONS.items() if _has_phrase(ql, k)]
     return (q + ". " + ". ".join(adds)) if adds else q
 
 
@@ -424,7 +441,7 @@ def search(q: str = "", event: str = "", phase: str = "", clip: str = ""):
     # clears the bar (a bi-encoder always returns a "best" result, even for junk).
     if q.strip():
         cand = [i for _, i in scored[:RERANK_K]]
-        passages = [f"{M[i].get('event', '')}. {M[i].get('prose', '')}" for i in cand]
+        passages = [_passage(M[i]) for i in cand]
         try:
             rs = rerank(q_search, passages)
             reranked = sorted(((rs.get(k, -1e9), cand[k]) for k in range(len(cand))), reverse=True)
@@ -462,7 +479,8 @@ def index():
     return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
 
 
-app.mount("/media", StaticFiles(directory=DATA), name="media")
+# Serve only per-clip media; transcripts, audio and working files elsewhere in data/ stay private.
+app.mount("/media/clips", StaticFiles(directory=DATA / "clips", check_dir=False), name="media")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 if __name__ == "__main__":

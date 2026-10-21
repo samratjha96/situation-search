@@ -11,7 +11,7 @@ everything in the clip itself:
      jersey number is legible — otherwise it uses '#<number> <shirt colour>'.
      It NEVER guesses names from general football knowledge.
 
-Output: data/index.json
+Output: data/clips/<clip>/index.json
 """
 import base64
 import json
@@ -256,6 +256,8 @@ def main():
                 print(f"[{len(by_id)}/{len(frames)}] {m['timecode']}  {m['event']:<12} {who!s:<16} {m['prose'][:46]}", flush=True)
             except Exception as e:
                 print(f"[frame {i}] FAILED: {e}", file=sys.stderr, flush=True)
+    if not by_id:
+        sys.exit("No moments captioned — check OPENROUTER_URL / OPENROUTER_API_KEY and the model routes.")
     print(f"\nWrote {len(by_id)} moments -> {OUT}")
 
 

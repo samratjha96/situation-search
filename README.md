@@ -55,11 +55,13 @@ Thus the app stays a small web server.
    The commentary gives the name of the scorer. Cards, shots, saves, and fouls
    come from one de-duplicated pass over the transcript.
 5. **Video-native events.** For footage with no scoreboard and no commentary, the
-   app divides the clip into chunks. It reads each chunk's frame burst for on-ball
-   events. It identifies each player by jersey number or shirt colour. It does not
+   app divides the clip into 8-second chunks. A video model watches each chunk for
+   on-ball events. It identifies each player by jersey number or shirt colour. It does not
    guess a name.
 
-Each stage writes into `data/index.json`.
+Each stage writes into `data/clips/<clip>/index.json`, where `<clip>` is the video's
+file name without the extension. The frames and a copy of the video go in the same
+directory.
 
 ### Search (live, for each query) — `app/server.py`
 
@@ -86,7 +88,9 @@ continues to run.
   you send through `video_url`. The model then makes a false scoreline and false
   player names. A perception question showed the problem: the video call gave the
   wrong shirt colours and the wrong score, but a single image gave the correct
-  values. The fix was to send real sampled frames as images. Note: a layer can
+  values. The fix was to send each chunk as a `file` content part, which the
+  endpoint does pass through (checked with a synthetic clip whose on-screen text
+  appears mid-clip; the model reads it). Note: a layer can
   look correct on a selected demo and still be wrong. Always check the output
   against known ground truth.
 
@@ -94,9 +98,10 @@ continues to run.
 
 ```bash
 # Build the index for ANY clip. Nothing is fixed to one match.
-CLIP_VIDEO=data/clip2.mp4 python pipeline/build.py
+CLIP_VIDEO=data/clip2.mp4 python pipeline/build.py   # -> data/clips/clip2/
 
-# Start the app
+# Register a new clip in CLIP_CONF in app/server.py (name, label, video file), then
+# start the app
 ./run_server.sh          # open http://127.0.0.1:8008
 ```
 
@@ -117,7 +122,8 @@ role at any OpenRouter-compatible model. The demo uses:
 
 | Role | Model | Where |
 |------|-------|-------|
-| Captioning / video events | Gemini 3.5 Flash | endpoint |
+| Captioning | Gemini 3.5 Flash | endpoint |
+| Video events (watches 8s chunks) | Gemini 4 Argon | endpoint |
 | Event reasoning | Gemini 3.1 Pro | endpoint |
 | Score OCR (reads the scorebug) | PaddleOCR-VL | endpoint |
 | Query + moment embeddings | NV-EmbedQA 1B | endpoint |

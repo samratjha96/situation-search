@@ -8,7 +8,7 @@ Stages (each run in its own env so deps never clash):
   3. asr      - local Whisper transcript (optional; skipped if it fails)
   4. caption  - per-moment visual-first captions (3-frame bursts)
   5. events   - commentary+scorebug event attribution
-  6. video    - video-native event timeline
+  6. video    - video-native event timeline (8s chunks sent as video)
 Nothing here is specific to a particular match — it reads only the clip.
 """
 import shutil
@@ -37,7 +37,8 @@ def main():
     src = cfg.VIDEO
     if not src.exists():
         sys.exit(f"CLIP_VIDEO not found: {src}")
-    dest = cfg.DATA / cfg.VIDEO_NAME       # the app serves the clip from data/
+    cfg.CLIP_DIR.mkdir(parents=True, exist_ok=True)
+    dest = cfg.CLIP_DIR / cfg.VIDEO_NAME   # the app serves the clip from data/clips/<clip>/
     if src != dest.resolve():
         shutil.copy(src, dest)
 
@@ -75,6 +76,7 @@ def main():
     uv(["openai", "json-repair"], "python", PIPE / "video_events.py")
 
     print("\nDONE ->", cfg.OUT)
+    print(f"Register the clip in CLIP_CONF (app/server.py) as {cfg.VIDEO.stem!r} to serve it.")
 
 
 if __name__ == "__main__":

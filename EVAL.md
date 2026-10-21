@@ -23,8 +23,9 @@ Re-reviewing the 7 detected goals frame-by-frame:
 | 08:32 | 2-0 | #11 celebrating with a teammate | real goal, VAR-disallowed |
 | 09:07 | 2-0 | keeper save, no celebration | FALSE POSITIVE (a save) |
 
-- **~6 of 7 detections are real balls-in-the-net** (2 counted + ~3 disallowed +
-  1 replay); only 1 is a true error.
+- **5 of 7 detections are distinct real balls-in-the-net** (2 counted + 3
+  disallowed). 1 is a duplicate (a replay of the 1-0, which the prompt is meant to
+  exclude) and 1 is a false positive (a save).
 - Recall of the 2 counted goals: **100%**.
 - The model is NOT hallucinating goals — it correctly sees the ball cross the
   line, including on disallowed goals the scorebug never counts. "Goal scored"
@@ -37,7 +38,7 @@ the pipeline catch each named event (±15 s). Precision = frame-checked sample.
 
 | type | recall (vs commentary) | detected | precision (sampled) | notes |
 |------|------------------------|----------|---------------------|-------|
-| goal (ball-in-net) | 2/2 counted (+3 disallowed found) | 7 | ~6/7 real | over-fires only ~1; rest are real incl. disallowed |
+| goal (ball-in-net) | 2/2 counted (+3 disallowed found) | 7 | 5/7 distinct real | 1 replay duplicate + 1 save; rest are real incl. disallowed |
 | shot | 5/5 | 14 | ~60-70% | near-goal shots right; some buildup mislabeled "shot" |
 | save | 2/2 | 9 | ~85%+ | mostly real keeper / goalmouth actions |
 | corner | 1/2 | 1 | — | UNDER-detected (only 1 all clip) |
@@ -48,7 +49,7 @@ the pipeline catch each named event (±15 s). Precision = frame-checked sample.
 
 Good:
 - **High recall on near-goal action** — it misses almost no shot/save/goal.
-- **Ball-in-net detection is strong** (~85%), including VAR-disallowed goals.
+- **Ball-in-net detection is good** (~71%, 5 of 7), including VAR-disallowed goals.
 
 Bad:
 - **Fine type precision is limited.** The model finds it hard to separate a shot,
@@ -73,3 +74,25 @@ Bad:
 Ground truth built from the scorebug (goals), commentary (named events), and
 direct frame review. Precision samples are small; treat the percentages as
 indicative, not exact. Repeatable per type via the same match-within-window scoring.
+
+## Gemini 4 Argon watching 8-second chunks (2026-10)
+
+The video-events stage now sends each 8 s chunk to Gemini 4 Argon as an mp4
+`file` part, in place of the 8-frame burst. Goal events scored against the
+scorebug goals on both clips (seed: 2, clip2: 5), counted as hits within ±10 s:
+
+| method | goals found | false goals |
+|--------|-------------|-------------|
+| 8-frame bursts (previous index) | 6/7 | 13 |
+| Argon on 8 s video chunks | 5/7 | 2 |
+
+- **Precision is the gain.** Argon labels replays and celebrations as such, so
+  their events are dropped. False goals fall from 13 to 2.
+- **Both misses are chunk-boundary goals** (seed 306 s, clip2 198 s). The ball
+  crosses the line in the first second of a chunk that is mostly celebration,
+  so the chunk is classed `celebration` and its events are dropped.
+- **Both false goals are the broadcast re-showing an earlier goal from the
+  main camera** (seed 423 s, clip2 493 s). The scorebug does not change and the
+  commentary is already talking about the goal.
+- **A 3 s lead-in on each chunk made it worse** (4 more false goals): replays
+  crept back in as `wide_live`. That change was reverted.

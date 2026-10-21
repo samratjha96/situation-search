@@ -15,7 +15,7 @@ commentary event list, de-duplicated. Each event is aligned to the nearest
 frame so the UI can show the clip. Degrades gracefully: no scorebug -> use
 commentary goals; no commentary -> score-change goals with no name.
 
-Reads/writes data/index.json (adds a top-level "events" list).
+Reads/writes data/clips/<clip>/index.json (adds a top-level "events" list).
 """
 import json
 import re
@@ -87,15 +87,18 @@ def extract_commentary_events(transcript):
 
 def score_change_goals(moments):
     """Objective goal timestamps from the OCR scorebug (total score increments)."""
+    readings = [(m["t_seconds"], sc) for m in sorted(moments, key=lambda x: x["t_seconds"])
+                if (sc := parse_score(m.get("score")))]
     goals, last_total = [], None
-    for m in sorted(moments, key=lambda x: x["t_seconds"]):
-        sc = parse_score(m.get("score"))
-        if not sc:
-            continue
+    for (t, sc), nxt in zip(readings, readings[1:] + [None]):
         total = sc[0] + sc[1]
+        # trust a total only when the next reading agrees, so a one-frame OCR misread
+        # neither invents a goal nor raises the baseline and hides the real ones
+        if nxt is None or sum(nxt[1]) != total:
+            continue
         if last_total is not None and total > last_total:
-            goals.append({"t": m["t_seconds"], "score": f"{sc[0]}-{sc[1]}"})
-        if last_total is None or total >= last_total:  # ignore transient OCR drops
+            goals.append({"t": t, "score": f"{sc[0]}-{sc[1]}"})
+        if last_total is None or total > last_total:  # ignore OCR drops
             last_total = total
     return goals
 
@@ -162,7 +165,7 @@ def main():
     events = build_events(moments, commentary)
     data["events"] = events
     INDEX.write_text(json.dumps(data, indent=2))
-    print(f"\n{len(events)} attributed events -> data/index.json\n")
+    print(f"\n{len(events)} attributed events -> {INDEX}\n")
     for e in events:
         extra = f" (assist {e['assist']})" if e.get("assist") else ""
         conf = "" if e["confirmed"] is None else (" [confirmed]" if e["confirmed"] else " [unconfirmed]")

@@ -1,14 +1,14 @@
 """Video-native event detection — works on ANY footage (incl. training clips).
 
-IMPORTANT: the inference endpoint (OpenAI-compatible) silently DROPS video sent
-via video_url — the model then confabulates a generic "buildup->shot->goal" from
-priors (verified: it invented scorelines and player names). So we send a BURST of
-real sampled frames as images (which it does process) and let the model read
-the motion across them. A calibrated prompt lets it answer "nothing notable" and
-forbids assuming a shot/goal. Identity is best-effort: jersey number or
-shirt-colour + position, never a guessed name.
+Each chunk is cut to a short mp4 and sent as the video itself, so the model sees
+real motion. It must go as a `file` content part: the endpoint silently DROPS
+video sent via video_url, and the model then confabulates a generic
+"buildup->shot->goal" from priors (verified: it invented scorelines and player
+names). A calibrated prompt lets it answer "nothing notable" and forbids
+assuming a shot/goal. Identity is best-effort: jersey number or shirt-colour +
+position, never a guessed name.
 
-Adds "video_chunks" and a flattened "video_events" list to data/index.json.
+Adds "video_chunks" and a flattened "video_events" list to data/clips/<clip>/index.json.
 Parallel, resumable, incremental.
 """
 import base64
@@ -23,15 +23,12 @@ from json_repair import repair_json
 from openai import OpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from config import CHUNKS, OPENROUTER_API_KEY, OPENROUTER_URL, OUT, VIDEO, VLM_MODEL
+from config import CHUNKS, OPENROUTER_API_KEY, OPENROUTER_URL, OUT, VIDEO, VIDEO_MODEL
 
 CHUNK_S = 8
-N_FRAMES = 8  # real frames sampled across each chunk (sent as images)
-MODEL = VLM_MODEL
 
 PROMPT = (
-    f"These are {N_FRAMES} frames sampled evenly across a ~{CHUNK_S}-second soccer clip "
-    f"(frame 1 = start, frame {N_FRAMES} = end). Describe what you LITERALLY see; do not infer.\n"
+    f"This is a ~{CHUNK_S}-second soccer clip. Describe what you LITERALLY see; do not infer.\n"
     "First classify shot_type: wide_live | close_up | replay | celebration | stoppage. "
     "If it is close_up / replay / celebration / stoppage, return an EMPTY events list "
     "(these are not live play — do NOT infer a goal from a celebration).\n"
@@ -42,10 +39,11 @@ PROMPT = (
     "For each clearly-visible on-ball event give a RICH factual detail: which players "
     "(by number/colour) do what, and where the ball goes.\n"
     "Return ONLY JSON with keys: shot_type, summary, and events (list of objects with keys: "
-    "frame_index 1-N, type (pass|shot|goal|cross|dribble|tackle|duel|save|clearance|"
-    "interception|foul|corner|free_kick|throw_in|other), key_player, "
+    f"t_offset_s (seconds from clip start, 0-{CHUNK_S}), type (pass|shot|goal|cross|dribble|"
+    "tackle|duel|save|clearance|interception|foul|corner|free_kick|throw_in|other), key_player, "
     "detail (one grounded sentence), confidence_0_1)."
 )
+
 
 client = OpenAI(base_url=OPENROUTER_URL, api_key=OPENROUTER_API_KEY)
 
@@ -61,33 +59,33 @@ def duration():
     return float(out.strip())
 
 
-def frame_uri(start, k):
-    """Extract one frame at start + k*step and return an image data URI."""
-    CHUNKS.mkdir(exist_ok=True)
-    t = start + k * (CHUNK_S / (N_FRAMES - 1))
-    tmp = CHUNKS / f"f_{start:04d}_{k}.jpg"
-    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", str(t),
-                    "-i", str(VIDEO), "-frames:v", "1", "-vf", "scale=854:-1", str(tmp)],
+def chunk_uri(start):
+    """Cut [start, start+CHUNK_S) to a small silent mp4 and return a video data URI."""
+    CHUNKS.mkdir(parents=True, exist_ok=True)
+    tmp = CHUNKS / f"c_{start:04d}.mp4"
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", str(start),
+                    "-t", str(CHUNK_S), "-i", str(VIDEO), "-an", "-vf", "scale=854:-2",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "28", str(tmp)],
                    check=True)
-    return "data:image/jpeg;base64," + base64.b64encode(tmp.read_bytes()).decode()
+    return "data:video/mp4;base64," + base64.b64encode(tmp.read_bytes()).decode()
 
 
 def analyze(start):
-    imgs = [{"type": "image_url", "image_url": {"url": frame_uri(start, k)}}
-            for k in range(N_FRAMES)]
+    clip = {"type": "file", "file": {"file_data": chunk_uri(start), "format": "video/mp4"}}
     r = client.chat.completions.create(
-        model=MODEL, temperature=0.0, max_tokens=6000,
-        messages=[{"role": "user", "content": [{"type": "text", "text": PROMPT}] + imgs}])
+        model=VIDEO_MODEL, temperature=0.0, max_tokens=6000,
+        messages=[{"role": "user", "content": [{"type": "text", "text": PROMPT}, clip]}])
     d = json.loads(repair_json(r.choices[0].message.content))
     shot_type = (d.get("shot_type") or "wide_live").lower()
-    step = CHUNK_S / (N_FRAMES - 1)
     evs = []
     # only trust events from live play; replays/celebrations/close-ups are flagged, not mined
     if shot_type in ("wide_live", "live"):
         for e in d.get("events", []):
-            fi = e.get("frame_index")
-            fi = int(fi) if isinstance(fi, (int, float)) or str(fi).isdigit() else 1
-            t = start + (fi - 1) * step
+            try:
+                off = min(max(float(e.get("t_offset_s")), 0.0), CHUNK_S)
+            except (TypeError, ValueError):
+                off = 0.0
+            t = start + off
             evs.append({"t_seconds": round(t, 1), "timecode": tc(t), "type": e.get("type"),
                         "key_player": e.get("key_player"), "detail": e.get("detail"),
                         "confidence": e.get("confidence_0_1"), "chunk_start": start})
@@ -97,6 +95,7 @@ def analyze(start):
 
 def main():
     starts = list(range(0, int(duration()), CHUNK_S))
+    OUT.parent.mkdir(parents=True, exist_ok=True)
     data = json.loads(OUT.read_text()) if OUT.exists() else {}
     results = {c["start"]: c for c in data.get("video_chunks", [])}
     todo = [s for s in starts if s not in results]
@@ -124,8 +123,10 @@ def main():
                 print(f"[{len(results)}/{len(starts)}] {tc(s)}  {line}", flush=True)
             except Exception as e:
                 print(f"[chunk {s}] FAILED: {e}", file=sys.stderr, flush=True)
+    if not results:
+        sys.exit("No chunks analysed — check OPENROUTER_URL / OPENROUTER_API_KEY and VIDEO_MODEL.")
     total = sum(len(c["events"]) for c in results.values())
-    print(f"\n{total} video-native events across {len(results)} chunks -> data/index.json")
+    print(f"\n{total} video-native events across {len(results)} chunks -> {OUT}")
 
 
 if __name__ == "__main__":

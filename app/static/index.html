@@ -166,12 +166,14 @@ const COLORS={goal:'var(--gold)',shot:'var(--warn)',save:'var(--purple)',
 const color=e=>COLORS[e]||'#3b4453';
 const NOTABLE=new Set(['goal','shot','save','penalty','foul','yellow_card','red_card',
   'corner','free_kick','cross','tackle','duel']);
-const badge=(t,c)=>`<span class="badge" style="background:${c}22;color:${c}">${t}</span>`;
+// Everything interpolated into HTML (query, model output, names) goes through esc().
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const badge=(t,c)=>`<span class="badge" style="background:${esc(c)}22;color:${esc(c)}">${esc(t)}</span>`;
 
 const video=document.getElementById('video');
 let TL=[], DUR=620, MOMENTS=[], activeTypes=null, sel=null, CLIP='';
 const withClip=q=>`${q}${q.includes('?')?'&':'?'}clip=${encodeURIComponent(CLIP)}`;
-// Frames are sampled on a 10s grid and captioned at the END of the play, so seek a
+// Frames are sampled on a 3s grid and captioned at the END of the play, so seek a
 // few seconds earlier to catch the build-up, not the aftermath.
 const PREROLL=8;
 
@@ -184,14 +186,14 @@ function setNow(e){
   document.getElementById('nowtc').textContent=e.timecode;
   const sb = e.type==='goal'&&e.scorebug_corroborated ? ' <span class="conf">scoreboard ✓</span>':'';
   document.getElementById('nowbadges').innerHTML=badge(e.type,color(e.type))+sb+
-    (e.key_player?` <span class="pchip">${e.key_player}</span>`:'');
+    (e.key_player?` <span class="pchip">${esc(e.key_player)}</span>`:'');
   document.getElementById('nowprose').textContent=e.detail||e.summary||'';
 }
 
 function showTip(m,e){
   const tip=document.getElementById('tip');
   const sb=e.type==='goal'&&e.scorebug_corroborated?' · scoreboard ✓':'';
-  tip.innerHTML=`<div class="th">${e.timecode} · ${e.type}${e.key_player?' · '+e.key_player:''}${sb}</div>${e.detail||e.summary||'(no description)'}`;
+  tip.innerHTML=`<div class="th">${esc(e.timecode)} · ${esc(e.type)}${e.key_player?' · '+esc(e.key_player):''}${sb}</div>${esc(e.detail||e.summary||'(no description)')}`;
   tip.style.display='block';
   const r=m.getBoundingClientRect();
   let left=Math.max(8,Math.min(window.innerWidth-tip.offsetWidth-8,r.left+r.width/2-tip.offsetWidth/2));
@@ -227,16 +229,16 @@ function renderEvents(){
   const box=document.getElementById('evlist');
   box.innerHTML=list.length?list.map(e=>`
     <div class="row" data-id="${e._id}">
-      <img loading="lazy" src="/media/${e.image}"/>
+      <img loading="lazy" src="/media/${esc(e.image)}"/>
       <div>
         <div class="top">
           ${badge(e.type,color(e.type))}
           ${e.type==='goal'&&e.scorebug_corroborated?'<span class="conf">scoreboard ✓</span>':''}
-          ${e.key_player?`<span class="pchip">${e.key_player}</span>`:''}
+          ${e.key_player?`<span class="pchip">${esc(e.key_player)}</span>`:''}
           ${e.confidence?`<span class="cf">${Math.round(e.confidence*100)}%</span>`:''}
-          <span class="tc">${e.timecode}</span>
+          <span class="tc">${esc(e.timecode)}</span>
         </div>
-        <p>${e.detail||e.summary||''}</p>
+        <p>${esc(e.detail||e.summary||'')}</p>
       </div>
     </div>`).join(''):'<div class="empty">No events of these types.</div>';
   box.querySelectorAll('.row').forEach(el=>{
@@ -250,7 +252,7 @@ function renderFilters(){
   const box=document.getElementById('evfilters');
   box.innerHTML=`<span class="chip" data-t="__notable">notable</span>
     <span class="chip" data-t="__all">all</span>`+
-    types.map(t=>`<span class="chip" data-t="${t}" style="border-color:${color(t)}55">${t}</span>`).join('');
+    types.map(t=>`<span class="chip" data-t="${esc(t)}" style="border-color:${esc(color(t))}55">${esc(t)}</span>`).join('');
   box.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{
     const t=c.dataset.t;
     if(t==='__all') activeTypes=null;
@@ -285,23 +287,23 @@ async function doSearch(){
   box.classList.remove('loading');
   if(!j.results.length){
     box.innerHTML=j.no_match
-      ? `<div class="empty">No moments in this clip strongly match <b>“${q}”</b>.<br><span style="font-size:12px">The tool says so rather than showing weak matches.</span></div>`
+      ? `<div class="empty">No moments in this clip strongly match <b>“${esc(q)}”</b>.<br><span style="font-size:12px">The tool says so rather than showing weak matches.</span></div>`
       : `<div class="empty">No results.</div>`;
     note.textContent = j.no_match ? 'reranked · nothing relevant' : '';
     return;
   }
   const maxs=Math.max(...j.results.map(r=>r.relevance||0),1e-6);
   box.innerHTML=j.results.map(m=>`
-    <div class="row" data-t="${m.t_seconds}">
-      <img loading="lazy" src="/media/${m.image}"/>
+    <div class="row" data-t="${esc(m.t_seconds)}">
+      <img loading="lazy" src="/media/${esc(m.image)}"/>
       <div><div class="top">${badge(m.event,color(m.event))}
-        ${m.scorer?`<span class="pchip">⚽ ${m.scorer}</span>`:''}
-        <span class="tc">${m.timecode}</span></div><p>${m.prose||''}</p></div></div>`).join('');
+        ${m.scorer?`<span class="pchip">⚽ ${esc(m.scorer)}</span>`:''}
+        <span class="tc">${esc(m.timecode)}</span></div><p>${esc(m.prose)}</p></div></div>`).join('');
   box.querySelectorAll('.row').forEach(el=>el.onclick=()=>jump(+el.dataset.t,null));
   note.textContent=`${j.ranking||'semantic'} · ${j.results.length} results`;
 }
 document.getElementById('q').addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(doSearch,280);});
-document.getElementById('examples').innerHTML=EXAMPLES.map(e=>`<span class="chip">${e}</span>`).join('');
+document.getElementById('examples').innerHTML=EXAMPLES.map(e=>`<span class="chip">${esc(e)}</span>`).join('');
 document.querySelectorAll('#examples .chip').forEach(c=>c.onclick=()=>{document.getElementById('q').value=c.textContent;doSearch();});
 
 // ---- players ----
@@ -310,7 +312,7 @@ async function loadPlayers(){
   document.getElementById('plist').innerHTML=j.players.map(p=>{
     const st=[p.goals?`<span class="g">⚽${p.goals}</span>`:'',p.assists?`🅰${p.assists}`:'',
       p.shots?`Sh${p.shots}`:'',p.cards?`🟨${p.cards}`:''].filter(Boolean).join(' ')||`${p.appearances} moments`;
-    return `<div class="prow" data-n="${encodeURIComponent(p.name)}"><span class="pn">${p.name}</span><span class="st">${st}</span></div>`;
+    return `<div class="prow" data-n="${esc(encodeURIComponent(p.name))}"><span class="pn">${esc(p.name)}</span><span class="st">${st}</span></div>`;
   }).join('');
   document.querySelectorAll('#plist .prow').forEach(el=>el.onclick=()=>selectPlayer(decodeURIComponent(el.dataset.n),el));
 }
@@ -318,19 +320,19 @@ async function selectPlayer(name,el){
   document.querySelectorAll('#plist .prow').forEach(x=>x.classList.toggle('sel',x===el));
   const j=await(await fetch(withClip(`/api/player?name=${encodeURIComponent(name)}`))).json();
   const s=j.stats;
-  document.getElementById('prnote').innerHTML=`<b>${name}</b> — ${s.goals}G ${s.assists}A ${s.shots}Sh ${s.cards}C · ${s.appearances} moments`;
+  document.getElementById('prnote').innerHTML=`<b>${esc(name)}</b> — ${s.goals}G ${s.assists}A ${s.shots}Sh ${s.cards}C · ${s.appearances} moments`;
   const box=document.getElementById('prlist');
   box.innerHTML=j.moments.map(m=>`
-    <div class="row" data-t="${m.t_seconds}"><img loading="lazy" src="/media/${m.image}"/>
-    <div><div class="top">${badge(m.event,color(m.event))}<span class="tc">${m.timecode}</span></div>
-    <p>${m.prose||''}</p></div></div>`).join('');
+    <div class="row" data-t="${esc(m.t_seconds)}"><img loading="lazy" src="/media/${esc(m.image)}"/>
+    <div><div class="top">${badge(m.event,color(m.event))}<span class="tc">${esc(m.timecode)}</span></div>
+    <p>${esc(m.prose)}</p></div></div>`).join('');
   box.querySelectorAll('.row').forEach(x=>x.onclick=()=>jump(+x.dataset.t,null));
 }
 
 async function loadClips(){
   const j=await(await fetch('/api/clips')).json();
   const el=document.getElementById('clipsel');
-  el.innerHTML=(j.clips||[]).map(c=>`<option value="${c.name}">${c.label}</option>`).join('');
+  el.innerHTML=(j.clips||[]).map(c=>`<option value="${esc(c.name)}">${esc(c.label)}</option>`).join('');
   CLIP=j.default||((j.clips||[])[0]||{}).name||'';
   el.value=CLIP;
   el.onchange=()=>{ if(el.value!==CLIP){ CLIP=el.value; switchClip(); } };
