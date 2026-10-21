@@ -364,19 +364,24 @@ def timeline(clip: str = ""):
     out = []
     for e in c.video_events:
         t = e["t_seconds"]
-        # Goals are detected from the video (works with no scoreboard). If a scorebug
-        # change happens to corroborate one, flag it as a bonus — but never require it.
+        # Goals are detected from the video (works with no scoreboard). When the clip
+        # has a scorebug, a goal it does not corroborate is a replay or a disallowed
+        # goal, so it is demoted to a shot.
         corro = None
         if e.get("type") == "goal":
             corro = any(abs(t - g) <= 20 for g in c.confirmed_goal_ts)
+            if c.confirmed_goal_ts and not corro:
+                e = {**e, "type": "shot"}
         out.append({**e, "image": c.nearest_image(t), "scorebug_corroborated": corro})
     out.sort(key=lambda x: x["t_seconds"])
-    # de-dup: adjacent chunks re-detect the same event — collapse same type within 4s
-    deduped = []
+    # de-dup: overlapping chunks re-detect the same event. Collapse same type within
+    # 4s; a goal is seen by both windows a few seconds apart, so within 15s.
+    deduped, last = [], {}
     for e in out:
-        if deduped and e["type"] == deduped[-1]["type"] and \
-                abs(e["t_seconds"] - deduped[-1]["t_seconds"]) <= 4:
+        prev = last.get(e["type"])
+        if prev is not None and e["t_seconds"] - prev <= (15 if e["type"] == "goal" else 4):
             continue
+        last[e["type"]] = e["t_seconds"]
         deduped.append(e)
     dur = max((m["t_seconds"] for m in c.moments), default=0) + 10
     return JSONResponse({"events": deduped, "duration": dur,

@@ -1,7 +1,9 @@
 """Video-native event detection — works on ANY footage (incl. training clips).
 
-Each chunk is cut to a short mp4 and sent as the video itself, so the model sees
-real motion. It must go as a `file` content part: the endpoint silently DROPS
+Chunks are 8 s long and start every 4 s, so each moment is seen by two windows
+and an event on a chunk boundary (a shot whose goal lands in the next chunk) is
+whole in one of them. Each chunk is cut to a short mp4 and sent as the video
+itself, so the model sees real motion. It must go as a `file` content part: the endpoint silently DROPS
 video sent via video_url, and the model then confabulates a generic
 "buildup->shot->goal" from priors (verified: it invented scorelines and player
 names). A calibrated prompt lets it answer "nothing notable" and forbids
@@ -26,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import CHUNKS, OPENROUTER_API_KEY, OPENROUTER_URL, OUT, VIDEO, VIDEO_MODEL
 
 CHUNK_S = 8
+STRIDE_S = 4  # overlapping windows; the server de-dups the double detections
 
 PROMPT = (
     f"This is a ~{CHUNK_S}-second soccer clip. Describe what you LITERALLY see; do not infer.\n"
@@ -94,12 +97,12 @@ def analyze(start):
 
 
 def main():
-    starts = list(range(0, int(duration()), CHUNK_S))
+    starts = list(range(0, int(duration()), STRIDE_S))
     OUT.parent.mkdir(parents=True, exist_ok=True)
     data = json.loads(OUT.read_text()) if OUT.exists() else {}
     results = {c["start"]: c for c in data.get("video_chunks", [])}
     todo = [s for s in starts if s not in results]
-    print(f"{len(starts)} chunks ({CHUNK_S}s), {len(todo)} to do")
+    print(f"{len(starts)} chunks ({CHUNK_S}s every {STRIDE_S}s), {len(todo)} to do")
     lock = threading.Lock()
 
     def save():

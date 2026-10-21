@@ -55,7 +55,8 @@ Thus the app stays a small web server.
    The commentary gives the name of the scorer. Cards, shots, saves, and fouls
    come from one de-duplicated pass over the transcript.
 5. **Video-native events.** For footage with no scoreboard and no commentary, the
-   app divides the clip into 8-second chunks. A video model watches each chunk for
+   app divides the clip into 8-second chunks that start every 4 seconds, so an event
+   on a chunk boundary is whole in one of them. A video model watches each chunk for
    on-ball events. It identifies each player by jersey number or shirt colour. It does not
    guess a name.
 

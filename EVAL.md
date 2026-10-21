@@ -96,3 +96,63 @@ scorebug goals on both clips (seed: 2, clip2: 5), counted as hits within ±10 s:
   commentary is already talking about the goal.
 - **A 3 s lead-in on each chunk made it worse** (4 more false goals): replays
   crept back in as `wide_live`. That change was reverted.
+
+### Manual review of Argon's chunk summaries
+
+66 of 155 chunks checked by eye against 2 fps contact sheets and the
+commentary track: every chunk with a goal, shot, save, corner, free kick or
+tackle, plus 3 random chunks per shot type.
+
+| verdict | seed (35) | clip2 (31) | total |
+|---------|-----------|------------|-------|
+| correct | 22 | 20 | 42 (64%) |
+| partly right (missed a save, wrong actor) | 4 | 5 | 9 |
+| wrong outcome or invented play | 5 | 3 | 8 |
+| replay labelled `wide_live` | 4 | 3 | 7 |
+
+- **Seed has a third goal the scorebug truth missed:** Mount at ~512 s (3-0).
+  Against 8 real goals, Argon finds 5/8 and the frame bursts 6/8. Argon
+  misses it the same way as the other two: the ball goes in in the last
+  half second of a chunk and the next chunk is `celebration`.
+- **Strong on what happened and who:** shirt numbers and names match the
+  commentary (Bruno #8, Mbeumo #19, Amad #16, Dorgu #13, Cunha #10, Lammens
+  #31). It reads the scoreboard change and describes Dorgu's goal going in off
+  the underside of the bar.
+- **Weak on goalmouth outcomes.** Two disallowed goals where the ball is in the
+  net (seed 144 s, 215 s) become "cleared off the line". Maguire's header onto
+  the bar becomes a clearance and a shot over. A goal (seed 304 s) becomes a
+  parry. It invents keeper catches (clip2 46 s) and a keeper touch on a shot
+  he never reached (seed 487 s).
+- **Main-camera replays read as live play.** 7 of the 13 replays sampled were
+  labelled `wide_live`, mostly ones that reuse the main camera angle.
+  Each mislabelled replay duplicates the original's events; two of them are
+  the false goals.
+- **A yellow card is lost.** The summary at 72 s gets the card shown to Dalot
+  right, but the chunk is `stoppage` and only `wide_live`/`live` chunks keep
+  events.
+
+### Old setup on the same chunks, and overlapping windows (2026-10-21)
+
+Old setup = Gemini 3.5 Flash on 8 still frames per 8s chunk (commit 801d725), graded by hand on the same 66 chunks (65 for the old run, which has no clip2 608 chunk).
+
+| | Argon (mp4) | Old (8 frames) |
+|---|---|---|
+| Correct | 42 (64%) | 37 (57%) |
+| Partly right | 9 | 7 |
+| Wrong outcome or invented play | 8 | 11 |
+| Replay labelled wide_live | 7 of 13 | 10 of 14 |
+
+The old run gets team or outcome wrong more often (City attack that was Amad, invented saves, an invented goal in a summary) and rarely names players. Argon labels three replays correctly that the old run treated as live goals (clip2 80, 328, seed 128).
+
+Overlap: a second Argon pass on 8s windows shifted by 4s (starts 4, 12, 20, ...), merged with the aligned chunks, goals deduped within 15s. Scorebug gate = keep a goal only if the OCR score changes between 10s before and 15s after it. Ground truth: 8 goals.
+
+| Variant | Goals hit | False goals |
+|---|---|---|
+| Old setup | 6/8 | 13 |
+| Old setup + scorebug gate | 6/8 | 1 |
+| Argon aligned | 5/8 | 2 |
+| Argon aligned + gate | 5/8 | 0 |
+| Argon aligned + shifted | 8/8 | 7 |
+| Argon aligned + shifted + gate | 7/8 | 0 |
+
+The shifted windows catch all three boundary goals (seed 302.5, seed 512, clip2 199) because the shot and the ball in the net land in one window. They also see more replays, so ungated they add false goals. The gate removes all of them. The one gated miss (seed 512, Mount's 3-0) is an OCR gap: the scorebug reading never moves past 2-0. Cost: twice the Argon calls.
