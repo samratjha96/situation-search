@@ -80,3 +80,28 @@ broadcast wide shots look alike.
   reconciled with the scoreboard (one live sighting per score change).
 - Clicking a result started 8 s early (a lead-in kept from the caption pipeline),
   so Cunha's goal started on the bench shot at 07:32. It is now 1 s.
+
+## Player tracking (Arsenal v Man United)
+
+Roboflow's football YOLOv8 detector plus ByteTrack, run locally on an M4 Pro (Apple
+GPU): 3,942 frames of live play (315 s at 12.5 fps) in about 13 minutes, 1 GB of
+memory, about 0.15 CPU cores (capped at 4 threads).
+
+| | |
+|---|---|
+| Actions matched to the acting player's track | 152 of 162 |
+| Shirt-colour clusters | 2, mapped to ARS and MU by the actions' teams |
+| Tracks after splitting at team changes | 1,188, median 1.6 s, 90th percentile 7.6 s |
+
+| Identity source | Before tracking | + track votes from action crops | + reads along tracks |
+|---|---|---|---|
+| Actions with a player number | 83 of 162 | 93 of 162 | 108 of 162 |
+
+Spot check of 7 track-identified actions at the action frame: the box sat on a
+plausible actor (right team, on the ball or in the duel) in 6; the number itself
+was visible in 1 (#23 Merino), the others got it from elsewhere on the track. In
+one, the ball was nearer a United player than the Arsenal receiver.
+
+Known weakness: ByteTrack matches by position only and swaps IDs when players
+cross during camera pans. Splitting at team changes fixes cross-team swaps, not
+swaps between teammates.

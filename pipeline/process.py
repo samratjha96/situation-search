@@ -10,6 +10,7 @@ present) and writes data/clips/<clip>/index.json:
   actions   on-ball actions from live play, absolute times, duplicates from
             overlapping windows merged, each with a player when the shirt was read:
             identity_source = crop (identity.py read the number on a zoomed crop)
+                            | track (another read on the same player track, track.py)
                             | shirt (the action log read the number or name)
                             | carried (same player as the receive/dribble next to it)
                             | none
@@ -26,6 +27,7 @@ import json
 import re
 import sys
 import unicodedata
+from bisect import bisect_left
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -34,6 +36,9 @@ from config import CLIP_DIR, FRAMES, INTERVAL_S
 
 ROSTER_MIN_VOTES, ROSTER_MIN_SHARE = 2, 0.6
 ROSTER_TRUSTED = 8    # with this many shirts read for a team, numbers off its roster are misreads
+TRACK_MATCH_S = 0.1     # a tracked frame this close to a time counts as that time
+TRACK_IOU = 0.3         # a drawn box and a tracked box this overlapping are the same player
+NEAR_BALL_PX = 60       # the ball-nearest player must be this close (feet to ball, pixels)
 CARRY_S = 2.5         # receive -> next action by the same team this soon = the same player
 CARRY_FROM = ("receive", "dribble", "interception", "tackle")  # he now has the ball
 CARRY_NEXT = ("pass", "dribble", "shot", "header", "cross")
@@ -136,13 +141,154 @@ def crop_number(crop, kit):
     return c[0][0] if c[0][1] >= 2 else None
 
 
-def identify(actions, roster, crops, kits):
-    known = Counter(k.split("#")[0] for k in roster)
+def two_means(points, iters=20):
+    """Deterministic 2-means: seeds are the two points farthest apart (via the first point)."""
+    d2 = lambda p, q: sum((x - y) ** 2 for x, y in zip(p, q))
+    a = max(points, key=lambda p: d2(p, points[0]))
+    b = max(points, key=lambda p: d2(p, a))
+    cents = [list(a), list(b)]
+    for _ in range(iters):
+        groups = [[], []]
+        for p in points:
+            groups[0 if d2(p, cents[0]) <= d2(p, cents[1]) else 1].append(p)
+        cents = [[sum(c) / len(g) for c in zip(*g)] if g else cents[i] for i, g in enumerate(groups)]
+    return cents, lambda p: 0 if d2(p, cents[0]) <= d2(p, cents[1]) else 1
+
+
+def iou(a, b):
+    ix = max(0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter + 1e-9)
+
+
+class Tracks:
+    """Player tracks (pipeline/track.py), cleaned: every outfield box gets a shirt-colour
+    cluster, and a track is split wherever its smoothed cluster changes (the tracker
+    jumped to a player of the other team)."""
+
+    def __init__(self, data):
+        self.w, self.h = data["width"], data["height"]
+        self.frames = data["frames"]
+        self.times = [f["t"] for f in self.frames]
+        pts = [p["bgr"] for f in self.frames for p in f["people"] if p["cls"] == "player" and p["bgr"]]
+        _, self.cluster = two_means(pts)
+        seq = defaultdict(list)
+        for f in self.frames:
+            for p in f["people"]:
+                if p["cls"] == "player" and p["bgr"]:
+                    seq[p["id"]].append((f["t"], p))
+        for tid, items in seq.items():
+            labels = [self.cluster(p["bgr"]) for _, p in items]
+            part = 0
+            for i, (_, p) in enumerate(items):
+                win = labels[max(0, i - 2):i + 3]
+                p["team_k"] = max(set(win), key=win.count)
+                if i and p["team_k"] != items[i - 1][1]["team_k"]:
+                    part += 1
+                p["track"] = f"{tid}.{part}"
+        self.team_k, self.span = {}, {}
+        for f in self.frames:
+            for p in f["people"]:
+                p.setdefault("track", str(p["id"]))
+                p.setdefault("team_k", None)
+                self.team_k[p["track"]] = p["team_k"]
+                a, b = self.span.get(p["track"], (f["t"], f["t"]))
+                self.span[p["track"]] = (min(a, f["t"]), max(b, f["t"]))
+
+    def frame_at(self, t):
+        i = bisect_left(self.times, t)
+        near = [j for j in (i - 1, i) if 0 <= j < len(self.times)]
+        j = min(near, key=lambda j: abs(self.times[j] - t), default=None)
+        return self.frames[j] if j is not None and abs(self.times[j] - t) <= TRACK_MATCH_S else None
+
+    def match(self, t, box_norm):
+        """The track whose box overlaps a 0-1000 normalized [ymin, xmin, ymax, xmax] box at t."""
+        f = self.frame_at(t)
+        if not f or not box_norm:
+            return None
+        y0, x0, y1, x1 = box_norm
+        b = [x0 * self.w / 1000, y0 * self.h / 1000, x1 * self.w / 1000, y1 * self.h / 1000]
+        best = max(f["people"], key=lambda p: iou(p["box"], b), default=None)
+        return best if best and iou(best["box"], b) >= TRACK_IOU else None
+
+    def nearest_ball(self, t, team_k):
+        """The outfield player of cluster team_k closest to the ball at t."""
+        f = self.frame_at(t)
+        if not f or not f["ball"]:
+            return None
+        bx, by = (f["ball"][0] + f["ball"][2]) / 2, (f["ball"][1] + f["ball"][3]) / 2
+        cand = [p for p in f["people"] if p["cls"] == "player" and p["team_k"] == team_k]
+        foot = lambda p: ((p["box"][0] + p["box"][2]) / 2 - bx) ** 2 + (p["box"][3] - by) ** 2
+        best = min(cand, key=foot, default=None)
+        return best if best and foot(best) <= NEAR_BALL_PX ** 2 else None
+
+
+def track_numbers(tracks, actions, crops, kits, roster, track_reads):
+    """Vote one shirt number per track from every crop read that overlaps it plus the
+    reads taken along the track itself (track_read.py), and map shirt-colour clusters
+    to team names by which team's actions their boxes belong to."""
+    votes, team_votes = defaultdict(Counter), defaultdict(Counter)
     for a in actions:
-        cn = crop_number(crops.get(f"{a['t']}|{a['action']}|{a['team']}"), kits.get(a["team"]))
+        c = crops.get(f"{a['t']}|{a['action']}|{a['team']}")
+        if not c:
+            continue
+        offs = c.get("offsets") or [-0.5, 0.0, 0.5]
+        boxed = [(o, bx) for o, bx in zip(offs, c.get("boxes") or []) if bx]
+        words = set(re.findall(r"[a-z]+", (kits.get(a["team"]) or "").lower()))
+        for (o, bx), r in zip(boxed, c.get("reads") or []):
+            p = tracks.match(a["t"] + o, bx)
+            if not p:
+                continue
+            if p["team_k"] is not None and a["team"]:
+                team_votes[p["team_k"]][a["team"]] += 1
+            n = num(r.get("shirt_number"))
+            if n and set(re.findall(r"[a-z]+", str(r.get("shirt_colour")).lower())) & words:
+                votes[p["track"]][(a["team"], n)] += 1
+    k2team = {k: c.most_common(1)[0][0] for k, c in team_votes.items()}
+    for tr, reads in track_reads.items():
+        team = k2team.get(tracks.team_k.get(tr))
+        words = set(re.findall(r"[a-z]+", (kits.get(team) or "").lower()))
+        for r in reads:
+            n = num(r.get("shirt_number"))
+            if team and n and set(re.findall(r"[a-z]+", str(r.get("shirt_colour")).lower())) & words:
+                votes[tr][(team, n)] += 1
+    known = Counter(k.split("#")[0] for k in roster)
+    numbers = {}
+    for tr, c in votes.items():
+        (team, n), k = c.most_common(1)[0]
+        if k >= 2 and k / sum(c.values()) >= 0.6 and (known[team] < ROSTER_TRUSTED or f"{team}#{n}" in roster):
+            numbers[tr] = (team, n)
+    return numbers, k2team
+
+
+def actor_track(tracks, a, crop, k2team):
+    """The track of the player doing action a: the box the identity step drew at the
+    action time, else the player of the acting team nearest the ball."""
+    if crop:
+        offs = crop.get("offsets") or [-0.5, 0.0, 0.5]
+        for o, bx in sorted(zip(offs, crop.get("boxes") or []), key=lambda x: abs(x[0])):
+            p = tracks.match(a["t"] + o, bx) if bx else None
+            if p:
+                return p
+    team_k = next((k for k, t in k2team.items() if t == a["team"]), None)
+    return tracks.nearest_ball(a["t"], team_k) if team_k is not None else None
+
+
+def identify(actions, roster, crops, kits, tracks=None, track_reads=None):
+    known = Counter(k.split("#")[0] for k in roster)
+    numbers, k2team = track_numbers(tracks, actions, crops, kits, roster, track_reads or {}) if tracks else ({}, {})
+    for a in actions:
+        crop = crops.get(f"{a['t']}|{a['action']}|{a['team']}")
+        cn = crop_number(crop, kits.get(a["team"]))
         n, src = None, "none"
+        p = actor_track(tracks, a, crop, k2team) if tracks else None
+        a["track"] = p["track"] if p else None
+        tn = numbers.get(a["track"]) if a["track"] else None
         if cn:
             n, src = cn, "crop"
+        elif tn and tn[0] == a["team"]:
+            n, src = tn[1], "track"
         elif a["number"]:
             n, src = a["number"], "shirt"
         if n and known[a["team"]] >= ROSTER_TRUSTED and f"{a['team']}#{n}" not in roster:
@@ -280,7 +426,11 @@ def main():
     teams = vision["teams"]
     roster = build_roster(vision["windows"], teams)
     actions = dedup(actions_from(vision, teams))
-    identify(actions, roster, crops, {t["name"]: t["kit"] for t in teams})
+    tp = CLIP_DIR / "tracks.json"
+    tracks = Tracks(json.loads(tp.read_text())) if tp.exists() else None
+    rp = CLIP_DIR / "track_reads.json"
+    identify(actions, roster, crops, {t["name"]: t["kit"] for t in teams}, tracks,
+             json.loads(rp.read_text()) if rp.exists() else {})
     sp = CLIP_DIR / "scoreboard.json"
     reads = json.loads(sp.read_text()) if sp.exists() else []
     has_board = sum(1 for r in reads if r["score"]) >= SCOREBOARD_MIN_SHARE * max(len(reads), 1)
@@ -297,7 +447,8 @@ def main():
         a["image"] = f"frames/{frames[min(int(a['t'] // INTERVAL_S), len(frames) - 1)]}" if frames else None
     index = {"video": vision["video"], "duration": vision["duration"], "teams": teams, "roster": roster,
              "frames": [f"frames/{f}" for f in frames], "frame_interval_s": INTERVAL_S,
-             "actions": actions, "episodes": episodes, "patterns": patterns, "goals": goals}
+             "actions": actions, "episodes": episodes, "patterns": patterns, "goals": goals,
+             "track_parts": {a["track"]: tracks.span[a["track"]] for a in actions if a.get("track")} if tracks else {}}
     (CLIP_DIR / "index.json").write_text(json.dumps(index, indent=1))
     ids = Counter(a["identity_source"] for a in actions)
     print(f"{len(roster)} roster entries, {len(actions)} actions (identity {dict(ids)}), "

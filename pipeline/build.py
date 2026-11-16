@@ -7,12 +7,15 @@ Vision models do all the perceiving; the rest is fixed processing.
   2. vision      team survey + action log from the video (VIDEO_MODEL)
   3. scoreboard  OCR of the top of each frame (OCR_MODEL); optional by nature:
                  footage without a scoreboard just yields no scores
-  4. process     roster from shirts, dedup, goals, set pieces, patterns
-  5. identity    zoomed crops read who did each action (VIDEO_MODEL)
-  6. process     again, now with the crop reads
-  7. embed       embeddings of the action descriptions (EMBED_MODEL)
-  8. calibrate   per-clip "no match" cutoff for free-text search
-Stages 2, 3 and 5 are resumable; re-running skips finished work.
+  4. track       football player detector + ByteTrack on live play (local GPU/CPU)
+  5. process     roster from shirts, dedup, goals, set pieces, patterns
+  6. identity    zoomed crops read who did each action (VIDEO_MODEL)
+  7. process     with the crop reads; matches each action to a player track
+  8. track_read  reads the number along each unnumbered acting track (VIDEO_MODEL)
+  9. process     with the track reads
+ 10. embed       embeddings of the action descriptions (EMBED_MODEL)
+ 11. calibrate   per-clip "no match" cutoff for free-text search
+Model stages are resumable; re-running skips finished work.
 """
 import shutil
 import subprocess
@@ -48,14 +51,20 @@ def main():
                         f"fps=1/{cfg.INTERVAL_S},scale=960:-1", str(cfg.FRAMES / "f_%04d.jpg")], check=True)
     steps = [("2. vision", ["openai", "json-repair"], "vision.py"),
              ("3. scoreboard", ["openai"], "scoreboard.py"),
-             ("4. process", [], "process.py"),
-             ("5. identity", ["openai", "json-repair"], "identity.py"),
-             ("6. process", [], "process.py"),
-             ("7. embed", ["openai"], "embed.py"),
-             ("8. calibrate", ["fastapi", "uvicorn", "numpy", "openai", "httpx"], "calibrate.py")]
+             ("4. track", None, "track.py"),
+             ("5. process", [], "process.py"),
+             ("6. identity", ["openai", "json-repair"], "identity.py"),
+             ("7. process", [], "process.py"),
+             ("8. track_read", ["openai", "json-repair"], "track_read.py"),
+             ("9. process", [], "process.py"),
+             ("10. embed", ["openai"], "embed.py"),
+             ("11. calibrate", ["fastapi", "uvicorn", "numpy", "openai", "httpx"], "calibrate.py")]
     for title, deps, script in steps:
         print(f"== {title} ==", flush=True)
-        uv(deps, script)
+        if deps is None:  # declares its own dependencies (PEP 723)
+            subprocess.run(["nice", "-n", "10", "uv", "run", "-q", str(PIPE / script)], check=True)
+        else:
+            uv(deps, script)
     print("\nDONE ->", cfg.OUT, "(the server picks it up on restart)")
 
 

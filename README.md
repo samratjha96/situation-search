@@ -42,11 +42,14 @@ footage with a scoreboard.
 | 1. frames | ffmpeg | A thumbnail every 3 s. |
 | 2. vision | vision model | **Team survey:** frames from across the clip; the model names both sides (from the scoreboard, or by kit or bib colour) and describes each kit. **Action log:** 6 s windows every 3 s, slowed to half speed so the model's ~1 fps sampling sees ~2 fps of play. For each window: shot type (live, replay, close-up, ...), every on-ball action (time, action, team, shirt number or name *if read*, body shape on receptions, start and end zones, pass length, outcome, pressure, a one-sentence description), and every shirt it can read, replays included. |
 | 3. scoreboard | OCR model | The top of every frame. Footage without a scoreboard just yields no scores. |
-| 4. process | fixed | Roster, dedup, goals, set pieces, patterns (below). |
-| 5. identity | vision model | For each action: 5 full-resolution frames over ±1 s, the model boxes the player doing it, the box is cropped and enlarged 6x, and the model reads the number and shirt colour from the crops alone. |
-| 6. process | fixed | Again, with the crop reads. |
-| 7. embed | embedding model | The action descriptions, for free-text search. |
-| 8. calibrate | fixed + reranker | The per-clip "no match" cutoff. |
+| 4. track | football detector, local | Roboflow's football-trained YOLOv8 boxes players, keepers, referees and the ball on every 2nd frame of live play; ByteTrack links boxes into tracks, restarting at each gap so camera cuts never join two players. Each box keeps its torso colour. Runs on the laptop GPU (about 5 frames/s, 1 GB). |
+| 5. process | fixed | Roster, dedup, goals, set pieces, patterns (below). |
+| 6. identity | vision model | For each action: 5 full-resolution frames over ±1 s, the model boxes the player doing it, the box is cropped and enlarged 6x, and the model reads the number and shirt colour from the crops alone. |
+| 7. process | fixed | With the crop reads; each action is matched to a player track. |
+| 8. track_read | vision model | For each acting track still without a number: up to 6 crops along the track (largest boxes first) read in one call. A player shows his back at some point of the track even if not at the action. |
+| 9. process | fixed | With the track reads. |
+| 10. embed | embedding model | The action descriptions, for free-text search. |
+| 11. calibrate | fixed + reranker | The per-clip "no match" cutoff. |
 
 **Fixed processing** (`pipeline/process.py`, no model calls):
 
@@ -54,9 +57,15 @@ footage with a scoreboard.
   least 2 sightings and 60% of that number's votes, and a name keeps only its most
   seen number. On the Arsenal clip this produced 27 correct pairs without a squad
   sheet.
+- **Tracks.** Boxes are split into two teams by 2-means on torso colour (teams named
+  by which team's actions their boxes belong to), and a track is cut wherever its
+  smoothed team changes: the tracker jumped to another player. Each track's number
+  is a vote over every read that falls on it (2 agreeing, 60%, on the roster).
 - **Identity per action.** In order of preference:
   1. *crop*: at least 2 crop reads whose shirt colour matches the team agree.
-  2. *shirt*: the action log read it.
+  2. *track*: the action's player track (the box the identity step drew, else the
+     acting team's player nearest the ball) has a number.
+  3. *shirt*: the action log read it.
   3. *carried*: a receive followed by a pass, dribble or shot by the same team
      within 2.5 s is the same player.
 
@@ -101,7 +110,9 @@ The endpoint URL, key and model routes come from a git-ignored `.env` (see
 
 | Role | Model |
 |------|-------|
-| Team survey, action log, crop identity | Gemini 4 Argon |
+| Team survey, action log, crop and track identity | Gemini 4 Argon |
+| Player and ball detection | Roboflow football YOLOv8 (local) |
+| Tracking | ByteTrack (supervision 0.25.1, local) |
 | Scoreboard OCR | PaddleOCR-VL |
 | Action description embeddings | NV-EmbedQA 1B |
 | Reranker | NV-RerankQA 1B |
@@ -112,9 +123,12 @@ made-up action lists on the same window, so they are not used.
 
 ## Limitations
 
-- **Identity depends on seeing the back of the shirt.** On the Arsenal clip, 83 of
-  162 live actions have a player number. Players facing the camera stay unnamed, so a
-  player's reel shows only part of his involvement (Mainoo: 1 snippet).
+- **Identity depends on seeing the back of the shirt.** On the Arsenal clip, 108 of
+  162 live actions have a player number. Tracks are short (median 1.6 s, because
+  of camera cuts and ID switches), which limits how far one good read reaches; a
+  player's reel still shows only part of his involvement (Mainoo: 4 actions).
+- **The tracking weights are AGPL-3.0** (Ultralytics YOLOv8). Fine for a demo;
+  check before any commercial use.
 - **The boxed player is not always the one acting.** Readings on the crops were
   right in an 8-crop audit, but in one crop two players overlapped.
 - **Zones and pitch geometry are the vision model's estimate.** No pitch-keypoint

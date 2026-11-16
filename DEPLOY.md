@@ -7,7 +7,9 @@ about 250 MB of RAM.
 
 ## 1. Build the index
 
-Run this once per clip, on a machine with the endpoint and `ffmpeg`:
+Run this once per clip, on a machine with the endpoint and `ffmpeg`. The tracking
+step needs the football player detector at `data/models/football-player-detection.pt`
+(from github.com/roboflow/sports, `examples/soccer/setup.sh`) and uses the local GPU:
 
     CLIP_VIDEO=data/clip2.mp4 python pipeline/build.py
 
