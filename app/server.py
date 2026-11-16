@@ -47,6 +47,7 @@ client = OpenAI(base_url=OPENROUTER_URL, api_key=OPENROUTER_KEY)
 NO_MATCH_THRESHOLD = float(os.environ.get("NO_MATCH_THRESHOLD", "-4.0"))
 SHOW_GAP = float(os.environ.get("SHOW_GAP", "5.0"))  # show results within this of the best
 RERANK_K = 40              # rerank the top-K cosine candidates
+REEL_GAP_S = 2.0           # player-reel snippets closer than this merge into one
 DEDUP_S = 6.0              # collapse adjacent same-event moments (dense 3s sampling)
 
 ROLE_KEYS = ("scorer", "assist", "shot_by", "card_player")
@@ -72,6 +73,10 @@ STOPWORDS = {"a", "an", "the", "in", "on", "of", "to", "for", "from", "by", "at"
 
 
 # ---- stateless helpers -----------------------------------------------------
+def tc(s):
+    return f"{int(s) // 60:02d}:{int(s) % 60:02d}"
+
+
 def _norm(s):
     return re.sub(r"\s+", " ", str(s or "").strip())
 
@@ -152,11 +157,40 @@ class Clip:
         self.squad = ([n for t in json.loads(lp.read_text())["teams"] for n in t["numbers"].values()]
                       if lp.exists() else [])
 
+    def reel(self, pc):
+        """Snippets where player pc is actively involved, merged in time.
+
+        Evidence, strongest first: he receives the ball (video receptions), he has an
+        on-ball role (scorer/shot/assist/card), or the caption describes him acting.
+        Being merely visible in a frame is not involvement."""
+        surname = pc.split()[-1].lower()
+        ev = []
+        for r in self.receptions:
+            if r.get("player") and self.canon(r["player"]) == pc:
+                ev.append((r["t_seconds"] - 3, r["t_seconds"] + 3, "receives", r.get("detail") or ""))
+        for m in self.moments:
+            t, prose = m["t_seconds"], m.get("prose", "")
+            roles = [k for k in ROLE_KEYS if m.get(k) and self.canon(m[k]) == pc]
+            if roles:
+                ev.append((t - 6, t + 2, roles[0].replace("_", " "), prose))
+            elif surname in prose.lower() and pc in {self.canon(n) for n in _mentions(m)}:
+                ev.append((t - 6, t + 2, m.get("event", ""), prose))
+        ev.sort()
+        segs = []
+        for a, b, kind, text in ev:
+            a = max(0.0, a)
+            if segs and a <= segs[-1]["end"] + REEL_GAP_S:
+                segs[-1]["end"] = max(segs[-1]["end"], b)
+                segs[-1]["evidence"].append({"kind": kind, "text": text})
+            else:
+                segs.append({"start": a, "end": b, "evidence": [{"kind": kind, "text": text}]})
+        return segs
+
     def named_player(self, ql):
-        """Squad player named in the query (full name or surname), else None."""
-        for n in self.squad:
+        """Squad or indexed player named in the query (full name or surname), else None."""
+        for n in list(self.squad) + [cl["canonical"] for cl in self.clusters]:
             if n.lower() in ql or (len(n.split()[-1]) >= 4 and _has_phrase(ql, n.split()[-1].lower())):
-                return n
+                return self.canon(n) or n
         return None
 
     def _build_episodes(self):
@@ -527,6 +561,20 @@ def search(q: str = "", event: str = "", phase: str = "", clip: str = ""):
     ql = q.lower()
     terms = [t for t in re.findall(r"[a-z0-9'-]+", ql) if t not in STOPWORDS]
     targets = target_events(ql)
+
+    # A query that is only a player's name is a highlight reel of that player.
+    pc = c.named_player(ql) if q.strip() else None
+    if pc:
+        name_words = set(re.findall(r"[a-z'-]+", pc.lower()))
+        if all(w in name_words or w in STOPWORDS for w in re.findall(r"[a-z'-]+", ql)):
+            segs = c.reel(pc)
+            results = [{"t_seconds": sg["start"], "timecode": tc(sg["start"]), "episode_end": sg["end"],
+                        "event": sg["evidence"][0]["kind"], "image": c.nearest_image(sg["start"] + 4),
+                        "prose": " ".join(e["text"] for e in sg["evidence"][:2]), "players": [pc]}
+                       for sg in segs]
+            return JSONResponse({"results": results, "reel": [[sg["start"], sg["end"]] for sg in segs],
+                                 "player": pc, "ranking": "reel", "count": len(results),
+                                 "no_match": not results, "query": q})
 
     if q.strip() and c.receptions and (any(t in ql for t in RECEIVE_TERMS)
                                         or any(t in ql for ts in BODY_TERMS.values() for t in ts)):

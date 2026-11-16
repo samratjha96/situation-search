@@ -74,6 +74,7 @@
   .list{display:flex;flex-direction:column;gap:8px;max-height:64vh;overflow:auto;margin-top:10px;
     transition:opacity .12s}
   .list.loading{opacity:.4;pointer-events:none}
+  .reelbtn{margin-left:8px;background:var(--line);color:var(--txt);border:0;border-radius:6px;padding:3px 10px;font:inherit;cursor:pointer}
   .spin{display:inline-block;width:11px;height:11px;border:2px solid var(--line);
     border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite;
     vertical-align:-1px;margin-right:6px}
@@ -298,7 +299,28 @@ async function doSearch(){
         <span class="tc">${esc(m.timecode)}${m.episode_end!=null?' – '+fmt(m.episode_end):''}</span></div><p>${esc(m.prose)}</p></div></div>`).join('');
   box.querySelectorAll('.row').forEach(el=>el.onclick=()=>jump(+el.dataset.t,null));
   note.textContent=`${j.results.length} result${j.results.length===1?'':'s'}`;
+  if(j.reel&&j.reel.length){
+    const secs=j.reel.reduce((a,[s,e])=>a+e-s,0);
+    note.innerHTML=`${j.reel.length} snippets · ${fmt(secs)} <button class="reelbtn" id="reelbtn">▶ Play reel</button>`;
+    document.getElementById('reelbtn').onclick=()=>playReel(j.reel);
+  }
 }
+
+// Play [start,end] snippets back to back; any manual seek or pause ends the reel.
+let REEL=null;
+function playReel(segs){ REEL={segs,i:0}; video.currentTime=segs[0][0]; video.play().catch(()=>{}); }
+video.addEventListener('timeupdate',()=>{
+  if(!REEL) return;
+  const [s,e]=REEL.segs[REEL.i];
+  if(video.currentTime<s-1.5){ REEL=null; return; }
+  if(video.currentTime>=e){
+    if(++REEL.i>=REEL.segs.length){ REEL=null; video.pause(); return; }
+    video.currentTime=REEL.segs[REEL.i][0];
+  }
+});
+video.addEventListener('seeking',()=>{
+  if(REEL){ const [s,e]=REEL.segs[REEL.i]; if(video.currentTime<s-1.5||video.currentTime>e+1.5) REEL=null; }
+});
 document.getElementById('q').addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(doSearch,280);});
 document.getElementById('examples').innerHTML=EXAMPLES.map(e=>`<span class="chip">${esc(e)}</span>`).join('');
 document.querySelectorAll('#examples .chip').forEach(c=>c.onclick=()=>{document.getElementById('q').value=c.textContent;doSearch();});

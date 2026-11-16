@@ -30,8 +30,10 @@ The demo runs on two public football highlight reels:
 - **Tactical vocabulary.** The app expands analyst phrases into the descriptive
   language of the captions. Thus "high press" and "switch of play" match on
   meaning.
-- **Player highlights.** Get one player's key moments from a clip. The app ranks
-  them by event importance.
+- **Player reels.** Search a player's name alone ("Kobbie Mainoo") to get every
+  snippet where he is actively involved: he receives the ball, scores, shoots,
+  assists, is carded, or the caption describes him acting. Being visible in the
+  frame is not enough. "Play reel" plays the snippets back to back.
 - **Event timeline.** A video-native event track (goals, shots, saves). It works
   also on footage with no scoreboard and no commentary.
 - **Any number of matches.** Every built clip under `data/clips/` appears in the
@@ -180,6 +182,9 @@ about 20 pixels tall.
 - With a squad sheet in the prompt, the caption model sometimes names a player
   whose number is not legible. Spot checks found 2 of 4 "Kobbie Mainoo" moments
   wrong.
+- Player reels are only as good as identification. Of 6 "Kobbie Mainoo"
+  snippets on the Arsenal clip, 3 to 4 were him; 2 came from captions that named
+  him without a legible number.
 - Most receivers in wide shots are unidentified. Higher-resolution or full-match
   footage would help more than prompt changes.
 
