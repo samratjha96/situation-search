@@ -41,7 +41,7 @@ client = OpenAI(base_url=OPENROUTER_URL, api_key=OPENROUTER_KEY)
 NO_MATCH_THRESHOLD = float(os.environ.get("NO_MATCH_THRESHOLD", "-4.0"))  # per-clip search.json overrides
 SHOW_GAP = float(os.environ.get("SHOW_GAP", "5.0"))  # semantic results within this of the best
 RERANK_K = 40
-REEL_PAD = (3.0, 3.0)  # seconds before/after each of the player's actions
+REEL_PAD = (3.0, 4.0)  # seconds before/after each of the player's actions (the finish lands after the touch)
 REEL_GAP_S = 2.0       # snippets closer than this merge
 
 # Query vocabulary -> structured filters. Longest phrases are matched first.

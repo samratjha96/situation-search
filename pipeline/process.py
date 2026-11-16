@@ -35,6 +35,7 @@ from config import CLIP_DIR, FRAMES, INTERVAL_S
 ROSTER_MIN_VOTES, ROSTER_MIN_SHARE = 2, 0.6
 ROSTER_TRUSTED = 8    # with this many shirts read for a team, numbers off its roster are misreads
 CARRY_S = 2.5         # receive -> next action by the same team this soon = the same player
+CARRY_FROM = ("receive", "dribble", "interception", "tackle")  # he now has the ball
 CARRY_NEXT = ("pass", "dribble", "shot", "header", "cross")
 DEDUP_S = 1.5          # same action by the same team this close = one action seen twice
 SET_PIECES = ("corner", "free_kick", "penalty")
@@ -42,7 +43,9 @@ OUTCOME_S = 10.0       # how long after a set piece its outcome is looked for
 COUNTER_S = 12.0       # ball won -> shot by the same team within this = counter-attack
 LIVE = ("live_wide", "live_close")
 SCOREBOARD_MIN_SHARE = 0.5  # below this share of frames with a score, there is no scoreboard
-GOAL_LOOKBACK_S = 45  # a highlight reel shows the goal, replays, then the new score
+GOAL_LOOKBACK_S = 45
+REPLAY_S = 15          # how much of the build-up a replayed goal shows
+REPLAY_WINDOW_S = 90   # replays of a goal come within this of its score change  # a highlight reel shows the goal, replays, then the new score
 
 
 def fold(s):
@@ -122,15 +125,15 @@ def dedup(actions):
 
 
 def crop_number(crop, kit):
-    """The number read on the zoomed crops: readable reads whose shirt colour matches the
-    team's kit must agree (a blank read is "not visible", not a disagreement)."""
+    """The number read on the zoomed crops: at least 2 readable reads whose shirt colour
+    matches the team's kit, agreeing (one read among blanks is too easy to misread)."""
     words = set(re.findall(r"[a-z]+", (kit or "").lower()))
     nums = [num(r.get("shirt_number")) for r in (crop or {}).get("reads", [])
             if num(r.get("shirt_number")) and set(re.findall(r"[a-z]+", str(r.get("shirt_colour")).lower())) & words]
     c = Counter(nums).most_common()
     if not c or (len(c) > 1 and c[0][1] == c[1][1]):
         return None
-    return c[0][0] if len(c) == 1 or c[0][1] >= 2 else None
+    return c[0][0] if c[0][1] >= 2 else None
 
 
 def identify(actions, roster, crops, kits):
@@ -153,12 +156,12 @@ def identify(actions, roster, crops, kits):
 
 
 def carry(actions):
-    """A player who receives the ball and then passes, dribbles or shoots is the same
-    player: link consecutive actions by one team when nothing happens in between."""
+    """A player who wins or receives the ball and then passes, dribbles or shoots is the
+    same player: link consecutive actions by one team when nothing happens in between."""
     for _ in range(3):  # chains of up to 3 links
         for a, b in zip(actions, actions[1:]):
             if a["team"] and a["team"] == b["team"] and b["t"] - a["t"] <= CARRY_S \
-                    and a["action"] in ("receive", "dribble") and b["action"] in CARRY_NEXT:
+                    and a["action"] in CARRY_FROM and b["action"] in CARRY_NEXT:
                 src, dst = (a, b) if a["number"] and not b["number"] else (b, a) if b["number"] and not a["number"] else (None, None)
                 if src:
                     dst.update(number=src["number"], player=src["player"], identity_source="carried")
@@ -224,6 +227,24 @@ def score_changes(reads):
     return out
 
 
+def drop_replays(actions, changes, teams):
+    """One score change is one goal, however often the broadcast shows it. Of the goals
+    the vision model saw, the live one is the scoring team's last sighting before the
+    score changes; every other sighting (replays from any camera, disallowed goals)
+    loses the REPLAY_S of actions leading up to it. Then renumber."""
+    seen = [a for a in actions if a["action"] == "goal" or a["outcome"] == "goal"]
+    live = set()
+    for t, k in changes:
+        before = [a["t"] for a in seen if a["team"] == teams[k]["name"] and t - REPLAY_WINDOW_S <= a["t"] <= t + 6]
+        if before:  # a goal and its shot are ~1 s apart: keep both
+            live |= {x for x in before if max(before) - x <= 3}
+    fake = [a["t"] for a in seen if a["t"] not in live]
+    kept = [a for a in actions if not any(f - REPLAY_S <= a["t"] <= f + 3 for f in fake)]
+    for i, a in enumerate(kept):
+        a["id"] = i
+    return kept
+
+
 def goals_seen(actions):
     """No scoreboard (e.g. training footage): goals the vision model saw go in during live play."""
     goals = []
@@ -260,10 +281,12 @@ def main():
     roster = build_roster(vision["windows"], teams)
     actions = dedup(actions_from(vision, teams))
     identify(actions, roster, crops, {t["name"]: t["kit"] for t in teams})
-    episodes, patterns = derive(actions)
     sp = CLIP_DIR / "scoreboard.json"
     reads = json.loads(sp.read_text()) if sp.exists() else []
     has_board = sum(1 for r in reads if r["score"]) >= SCOREBOARD_MIN_SHARE * max(len(reads), 1)
+    if has_board:
+        actions = drop_replays(actions, score_changes(reads), teams)
+    episodes, patterns = derive(actions)
     goals = goals_from(reads, actions, teams) if has_board else goals_seen(actions)
     for e in episodes:  # a set piece "led to a goal" only if the scoreboard says a goal came
         scored = any(e["start"] <= g["t"] <= e["start"] + OUTCOME_S + 2 and g["team"] == e["team"] for g in goals)

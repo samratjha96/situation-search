@@ -51,3 +51,32 @@ Replays never add goals, because the score does not change during a replay.
 |---|---|---|---|
 | Arsenal v Man United | 1.56 | -6.83 | -4.73 |
 | Man United v Man City | 1.56 | -6.26 | -4.30 |
+
+## Frame embeddings (tried, not used)
+
+All 204 frames of the Arsenal clip embedded with `llama-nemotron-embed-vl-1b-v2`
+(the only VL embedder on the endpoint that accepts images; Qwen3-VL-Embedding
+takes the image as text). Top-5 hits within 4 s of frame-checked times:
+
+| Query | Frame embeddings | Text search over action descriptions |
+|---|---|---|
+| corner kick being taken | 0/5 | 5/5 |
+| goalkeeper diving save | 1/5 | 3/5 |
+| defensive wall at a free kick | 0/5 | 1/5 |
+| switch of play | 1/5 | 0/5 |
+| counter attack | 0/5 | 1/5 |
+
+Best similarity for "switch of play" was 0.15 and for "recipe for pasta" 0.04, so
+frame scores are too flat to set a cutoff. A single frame cannot show motion, and
+broadcast wide shots look alike.
+
+## Fixes from review of the live reels
+
+- A dribble at 03:17 was credited to Cunha from one "10" read among four blank
+  crops; it was Mbeumo. Crop identity now needs 2 agreeing reads, and identity
+  carries from an interception to the next touch.
+- Mbeumo's goal appeared three times: at 02:49 and 03:41 as replays from the high
+  tactical camera, which the vision model labels as live. Goal sightings are now
+  reconciled with the scoreboard (one live sighting per score change).
+- Clicking a result started 8 s early (a lead-in kept from the caption pipeline),
+  so Cunha's goal started on the bench shot at 07:32. It is now 1 s.

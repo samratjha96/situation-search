@@ -55,7 +55,7 @@ footage with a scoreboard.
   seen number. On the Arsenal clip this produced 27 correct pairs without a squad
   sheet.
 - **Identity per action.** In order of preference:
-  1. *crop*: the readable crop reads whose shirt colour matches the team agree.
+  1. *crop*: at least 2 crop reads whose shirt colour matches the team agree.
   2. *shirt*: the action log read it.
   3. *carried*: a receive followed by a pass, dribble or shot by the same team
      within 2.5 s is the same player.
@@ -65,6 +65,10 @@ footage with a scoreboard.
 - **Goals.** Each score increment that holds for 2 reads is a goal. The scorer is
   the scoring team's last shot or header in the 45 s before it. Without a
   scoreboard, goals are the ones the vision model saw go in.
+- **Replays.** One score change is one goal. Of the goals the vision model saw
+  near it, only the last sighting before the score changes is live; every other
+  sighting is a replay (often from a high camera that looks live), and the 15 s
+  leading up to it are dropped.
 - **Set pieces.** A corner, free kick or penalty, plus the actions in the next 10 s.
   The outcome is goal (only if the scoreboard confirms one), save, shot or
   cleared.
@@ -74,8 +78,8 @@ footage with a scoreboard.
 
 ### Search (live): `app/server.py`
 
-1. **A name alone** returns the player's reel: each of his actions padded to ±3 s,
-   with snippets less than 2 s apart merged.
+1. **A name alone** returns the player's reel: each of his actions from 3 s before
+   to 4 s after, with snippets less than 2 s apart merged.
 2. **Football vocabulary** becomes filters on the index: set pieces, patterns,
    goals, actions, body shape, outcome, team, and player. The reranker orders
    the hits.
@@ -108,8 +112,8 @@ made-up action lists on the same window, so they are not used.
 
 ## Limitations
 
-- **Identity depends on seeing the back of the shirt.** On the Arsenal clip, 124 of
-  210 actions have a player number. Players facing the camera stay unnamed, so a
+- **Identity depends on seeing the back of the shirt.** On the Arsenal clip, 83 of
+  162 live actions have a player number. Players facing the camera stay unnamed, so a
   player's reel shows only part of his involvement (Mainoo: 1 snippet).
 - **The boxed player is not always the one acting.** Readings on the crops were
   right in an 8-crop audit, but in one crop two players overlapped.

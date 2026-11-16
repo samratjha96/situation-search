@@ -170,9 +170,8 @@ const badge=(t,c)=>`<span class="badge" style="background:${esc(c)}22;color:${es
 const video=document.getElementById('video');
 let TL=[], DUR=620, activeTypes=null, sel=null, CLIP='';
 const withClip=q=>`${q}${q.includes('?')?'&':'?'}clip=${encodeURIComponent(CLIP)}`;
-// Frames are sampled on a 3s grid and captioned at the END of the play, so seek a
-// few seconds earlier to catch the build-up, not the aftermath.
-const PREROLL=8;
+// Action times come from the video itself; start a second early to see the touch.
+const PREROLL=1;
 
 function jump(t,id){
   sel=id; video.currentTime=Math.max(0, t-PREROLL); video.play().catch(()=>{});
