@@ -7,13 +7,14 @@ about 250 MB of RAM.
 
 ## 1. Build the index
 
-Run this one time, on a machine with the endpoint, `ffmpeg`, and Whisper:
+Run this once per clip, on a machine with the endpoint and `ffmpeg`:
 
     CLIP_VIDEO=data/clip2.mp4 python pipeline/build.py
 
-Put the squad sheet at `data/clips/clip2/lineup.json` first if you have one. The
-build makes `data/clips/clip2/index.json` and `search.json` (the clip's no-match
-cutoff) and puts the frames and a copy of the clip in the same directory. The
+The build writes into `data/clips/clip2/`: the frames, a copy of the clip,
+`vision.json`, `scoreboard.json` and `identity.json` (raw model output),
+`index.json` (the processed index the app serves), `embeddings.json`, and
+`search.json` (the no-match cutoff). The
 server serves every clip it finds under `data/clips/`; set `DEFAULT_CLIP` to choose
 which one opens first.
 

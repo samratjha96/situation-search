@@ -1,9 +1,10 @@
-"""Set each clip's "no match" cutoff from queries that need no hand labels.
+"""Set each clip's "no match" cutoff for free-text search, with no hand labels.
 
-Every football highlight reel contains goals, shots and saves, and none contains
-pasta. The cutoff is the midpoint between the best reranker score of the weakest
-football query and the strongest off-topic query, a quarter of the way up from junk:
-tactical queries ("switch of play") legitimately score well below "goal". Writes data/clips/<clip>/search.json.
+Any soccer footage (match or training) has players passing, receiving and shooting,
+and none has pasta. Free-text search scores both kinds of query against the
+vision model's action descriptions; the cutoff goes a quarter of the way up from
+the strongest off-topic score to the weakest football score. Writes
+data/clips/<clip>/search.json.
 
     python pipeline/calibrate.py            # all clips
 """
@@ -15,19 +16,17 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "app"))
 import server  # noqa: E402
 
-POSITIVE = ["goal", "shot on goal", "goalkeeper save", "players celebrate a goal",
-            "attack down the wing"]
+POSITIVE = ["a player passes the ball to a teammate", "a player controls the ball",
+            "a player shoots towards goal", "a defender wins the ball back", "a player runs with the ball"]
 JUNK = ["recipe for pasta", "basketball slam dunk", "weather forecast", "cat asleep on a sofa",
         "tennis serve", "stock market chart", "a car driving on a motorway"]
 
-server.SHOW_GAP = 0.0
 for name in server.CLIP_ORDER:
     c = server.CLIPS[name]
-    c.no_match = -1e9  # let every query return its best candidate
 
     def best(q):
-        res = json.loads(server.search(q=q, clip=name).body)["results"]
-        return res[0]["relevance"] if res else -1e9
+        ranked = server.semantic(c, q)
+        return ranked[0][0] if ranked else -1e9
 
     pos = {q: best(q) for q in POSITIVE}
     junk = {q: best(q) for q in JUNK}

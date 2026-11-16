@@ -168,7 +168,7 @@ const fmt=s=>`${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%
 const badge=(t,c)=>`<span class="badge" style="background:${esc(c)}22;color:${esc(c)}">${esc(t)}</span>`;
 
 const video=document.getElementById('video');
-let TL=[], DUR=620, MOMENTS=[], activeTypes=null, sel=null, CLIP='';
+let TL=[], DUR=620, activeTypes=null, sel=null, CLIP='';
 const withClip=q=>`${q}${q.includes('?')?'&':'?'}clip=${encodeURIComponent(CLIP)}`;
 // Frames are sampled on a 3s grid and captioned at the END of the play, so seek a
 // few seconds earlier to catch the build-up, not the aftermath.
@@ -330,7 +330,7 @@ async function loadPlayers(){
   const j=await(await fetch(withClip('/api/players'))).json();
   document.getElementById('plist').innerHTML=j.players.map(p=>{
     const st=[p.goals?`<span class="g">⚽${p.goals}</span>`:'',p.assists?`🅰${p.assists}`:'',
-      p.shots?`Sh${p.shots}`:'',p.cards?`🟨${p.cards}`:''].filter(Boolean).join(' ')||`${p.appearances} moments`;
+      p.shots?`Sh${p.shots}`:''].filter(Boolean).join(' ')||`${p.appearances} actions`;
     return `<div class="prow" data-n="${esc(encodeURIComponent(p.name))}"><span class="pn">${esc(p.name)}</span><span class="st">${st}</span></div>`;
   }).join('');
   document.querySelectorAll('#plist .prow').forEach(el=>el.onclick=()=>selectPlayer(decodeURIComponent(el.dataset.n),el));
@@ -339,11 +339,13 @@ async function selectPlayer(name,el){
   document.querySelectorAll('#plist .prow').forEach(x=>x.classList.toggle('sel',x===el));
   const j=await(await fetch(withClip(`/api/player?name=${encodeURIComponent(name)}`))).json();
   const s=j.stats;
-  document.getElementById('prnote').innerHTML=`<b>${esc(name)}</b> — ${s.goals}G ${s.assists}A ${s.shots}Sh ${s.cards}C · ${s.appearances} moments`;
+  document.getElementById('prnote').innerHTML=`<b>${esc(j.name)}</b> — ${s.goals||0} goals · ${s.shots||0} shots · ${s.appearances||0} actions`+
+    (j.reel.length?` <button class="reelbtn" id="preelbtn">▶ Play reel</button>`:'');
+  if(j.reel.length) document.getElementById('preelbtn').onclick=()=>playReel(j.reel);
   const box=document.getElementById('prlist');
   box.innerHTML=j.moments.map(m=>`
     <div class="row" data-t="${esc(m.t_seconds)}"><img loading="lazy" src="/media/${esc(m.image)}"/>
-    <div><div class="top">${badge(m.event,color(m.event))}<span class="tc">${esc(m.timecode)}</span></div>
+    <div><div class="top">${badge(m.event,color(m.event))}<span class="tc">${esc(m.timecode)}${m.episode_end!=null?' – '+fmt(m.episode_end):''}</span></div>
     <p>${esc(m.prose)}</p></div></div>`).join('');
   box.querySelectorAll('.row').forEach(x=>x.onclick=()=>jump(+x.dataset.t,null));
 }
@@ -357,8 +359,8 @@ async function loadClips(){
   el.onchange=()=>{ if(el.value!==CLIP){ CLIP=el.value; switchClip(); } };
 }
 async function loadClip(){
-  const mj=await(await fetch(withClip('/api/moments'))).json();
-  MOMENTS=mj.moments; video.src=`/media/${mj.video}`;
+  const mj=await(await fetch(withClip('/api/clip'))).json();
+  video.src=`/media/${mj.video}`;
   const tj=await(await fetch(withClip('/api/timeline'))).json();
   TL=tj.events.map((e,i)=>({...e,_id:i})); DUR=tj.duration;
   document.getElementById('ctx').textContent=`${TL.length} events`;
@@ -372,7 +374,7 @@ async function loadClip(){
 }
 function switchClip(){
   // reset per-clip UI state, then reload everything for the newly-selected clip
-  sel=null; TL=[]; MOMENTS=[]; activeTypes=null;
+  sel=null; TL=[]; activeTypes=null;
   document.getElementById('prnote').innerHTML='';
   document.getElementById('prlist').innerHTML='';
   document.getElementById('plist').innerHTML='';
