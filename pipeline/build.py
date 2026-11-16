@@ -9,6 +9,10 @@ Stages (each run in its own env so deps never clash):
   4. caption  - per-moment visual-first captions (3-frame bursts)
   5. events   - commentary+scorebug event attribution
   6. video    - video-native event timeline (8s chunks sent as video)
+  7. receive  - ball receptions with body shape (6s windows, slowed 2x)
+  8. calibrate - per-clip 'no match' cutoff from football vs off-topic queries
+Put the match squad sheet at data/clips/<clip>/lineup.json first: it is how
+shirt numbers become names.
 Nothing here is specific to a particular match — it reads only the clip.
 """
 import shutil
@@ -74,9 +78,12 @@ def main():
     uv(["openai"], "python", PIPE / "events.py")
     print("== 6. video-native events ==")
     uv(["openai", "json-repair"], "python", PIPE / "video_events.py")
+    print("== 7. receptions ==")
+    uv(["openai", "json-repair"], "python", PIPE / "receptions.py")
+    print("== 8. calibrate no-match cutoff ==")
+    uv(["fastapi", "uvicorn", "numpy", "openai", "httpx"], "python", PIPE / "calibrate.py")
 
-    print("\nDONE ->", cfg.OUT)
-    print(f"Register the clip in CLIP_CONF (app/server.py) as {cfg.VIDEO.stem!r} to serve it.")
+    print("\nDONE ->", cfg.OUT, "(the server picks it up on restart)")
 
 
 if __name__ == "__main__":

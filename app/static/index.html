@@ -17,8 +17,6 @@
   header{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;
     align-items:baseline;gap:12px;background:var(--panel)}
   header h1{margin:0;font-size:17px;letter-spacing:.2px}
-  header .tag{font-size:11px;color:var(--muted);border:1px solid var(--line);
-    padding:2px 8px;border-radius:20px}
   header .hright{margin-left:auto;display:flex;align-items:center;gap:12px}
   header .clipwrap{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px}
   header select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
@@ -107,7 +105,6 @@
 <body>
 <header>
   <h1>Situation Search</h1>
-  <span class="tag">find any match moment by describing it · runs on a laptop</span>
   <div class="hright">
     <label class="clipwrap">Clip <select id="clipsel"></select></label>
     <span class="ctx" id="ctx">loading…</span>
@@ -118,7 +115,7 @@
   <div class="left card">
     <video id="video" controls preload="metadata"></video>
     <div class="nowbar"><span class="tc" id="nowtc">00:00</span><span id="nowbadges"></span></div>
-    <div class="nowprose" id="nowprose">Click any event to jump the video.</div>
+    <div class="nowprose" id="nowprose"></div>
     <div class="tl">
       <div class="lbl">Event timeline <span id="tlcount"></span></div>
       <div class="axis" id="axis"></div>
@@ -134,21 +131,19 @@
     </div>
 
     <div class="pane active" id="pane-search">
-      <input id="q" type="text" placeholder="Ask this match anything — e.g. “goalkeeper diving save”" autocomplete="off"/>
+      <input id="q" type="text" placeholder="Search this match" autocomplete="off"/>
       <div class="filters" id="examples" style="margin-top:11px"></div>
       <div class="note" id="srnote"></div>
       <div class="list" id="srlist"></div>
     </div>
 
     <div class="pane" id="pane-events">
-      <div class="note" id="evnote"></div>
       <div class="filters" id="evfilters"></div>
       <div class="list" id="evlist"></div>
     </div>
 
     <div class="pane" id="pane-players">
       <div class="plist list" id="plist"></div>
-      <div class="note">Stats are counted from the confirmed event list, not per frame.</div>
       <div class="note" id="prnote"></div>
       <div class="list" id="prlist"></div>
     </div>
@@ -168,6 +163,7 @@ const NOTABLE=new Set(['goal','shot','save','penalty','foul','yellow_card','red_
   'corner','free_kick','cross','tackle','duel']);
 // Everything interpolated into HTML (query, model output, names) goes through esc().
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=s=>`${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 const badge=(t,c)=>`<span class="badge" style="background:${esc(c)}22;color:${esc(c)}">${esc(t)}</span>`;
 
 const video=document.getElementById('video');
@@ -282,14 +278,14 @@ async function doSearch(){
   note.innerHTML=`<span class="spin"></span>Searching…`;
   let j;
   try{ j=await(await fetch(withClip(`/api/search?q=${encodeURIComponent(q)}`))).json(); }
-  catch(e){ if(seq===searchSeq){ box.classList.remove('loading'); note.textContent='Search failed — is the server running?'; } return; }
+  catch(e){ if(seq===searchSeq){ box.classList.remove('loading'); note.textContent='Search failed.'; } return; }
   if(seq!==searchSeq) return;            // a newer search superseded this one
   box.classList.remove('loading');
   if(!j.results.length){
     box.innerHTML=j.no_match
-      ? `<div class="empty">No moments in this clip strongly match <b>“${esc(q)}”</b>.<br><span style="font-size:12px">The tool says so rather than showing weak matches.</span></div>`
+      ? `<div class="empty">No match for <b>“${esc(q)}”</b>.</div>`
       : `<div class="empty">No results.</div>`;
-    note.textContent = j.no_match ? 'reranked · nothing relevant' : '';
+    note.textContent = '';
     return;
   }
   const maxs=Math.max(...j.results.map(r=>r.relevance||0),1e-6);
@@ -297,10 +293,11 @@ async function doSearch(){
     <div class="row" data-t="${esc(m.t_seconds)}">
       <img loading="lazy" src="/media/${esc(m.image)}"/>
       <div><div class="top">${badge(m.event,color(m.event))}
+        ${m.outcome?badge('→ '+m.outcome,color(m.outcome==='cleared'?'other':m.outcome)):''}
         ${m.scorer?`<span class="pchip">⚽ ${esc(m.scorer)}</span>`:''}
-        <span class="tc">${esc(m.timecode)}</span></div><p>${esc(m.prose)}</p></div></div>`).join('');
+        <span class="tc">${esc(m.timecode)}${m.episode_end!=null?' – '+fmt(m.episode_end):''}</span></div><p>${esc(m.prose)}</p></div></div>`).join('');
   box.querySelectorAll('.row').forEach(el=>el.onclick=()=>jump(+el.dataset.t,null));
-  note.textContent=`${j.ranking||'semantic'} · ${j.results.length} results`;
+  note.textContent=`${j.results.length} result${j.results.length===1?'':'s'}`;
 }
 document.getElementById('q').addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(doSearch,280);});
 document.getElementById('examples').innerHTML=EXAMPLES.map(e=>`<span class="chip">${esc(e)}</span>`).join('');
@@ -344,16 +341,10 @@ async function loadClip(){
   TL=tj.events.map((e,i)=>({...e,_id:i})); DUR=tj.duration;
   document.getElementById('ctx').textContent=`${TL.length} events`;
   document.getElementById('tlcount').textContent=`· ${TL.length} events · ${tj.confirmed_goals} confirmed goals`;
-  document.getElementById('evnote').innerHTML=
-    `Read directly from the video — works with no scoreboard or commentary. A goal is `+
-    `detected when the ball is seen entering the net (<span class="conf">scoreboard ✓</span> `+
-    `= the scoreboard also agreed). Replays & celebrations are excluded. Identity is `+
-    `best-effort (number/colour).`;
   activeTypes=new Set(NOTABLE);
   renderFilters();
   document.querySelector('#evfilters .chip[data-t="__notable"]').classList.add('on');
   renderAxis(); renderEvents(); loadPlayers();
-  // land on live search results so the tool shows its value immediately
   const q0=new URLSearchParams(location.search).get('q')||'shot on goal';
   document.getElementById('q').value=q0; doSearch();
 }
@@ -363,7 +354,7 @@ function switchClip(){
   document.getElementById('prnote').innerHTML='';
   document.getElementById('prlist').innerHTML='';
   document.getElementById('plist').innerHTML='';
-  document.getElementById('nowprose').textContent='Click any event to jump the video.';
+  document.getElementById('nowprose').textContent='';
   document.getElementById('nowbadges').innerHTML='';
   document.getElementById('nowtc').textContent='00:00';
   loadClip();

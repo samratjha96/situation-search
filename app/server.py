@@ -42,9 +42,9 @@ EMBED_MODEL = os.environ.get("EMBED_MODEL", "openai/text-embedding-3-small")
 RERANK_MODEL = os.environ.get("RERANK_MODEL", "cohere/rerank-v3.5")
 client = OpenAI(base_url=OPENROUTER_URL, api_key=OPENROUTER_KEY)
 
-# Calibrated on these clips with NV-RerankQA 1B logits: legit queries bottom out ~-2,
-# junk/absent tops out ~-7. A reranker with another score scale (e.g. 0-1) needs its own.
-NO_MATCH_THRESHOLD = float(os.environ.get("NO_MATCH_THRESHOLD", "-4.0"))  # best below this -> "nothing here"
+# Default "no match" cutoff on the reranker score. Each clip overrides it with its own
+# value from data/clips/<clip>/search.json, written by pipeline/calibrate.py.
+NO_MATCH_THRESHOLD = float(os.environ.get("NO_MATCH_THRESHOLD", "-4.0"))
 SHOW_GAP = float(os.environ.get("SHOW_GAP", "5.0"))  # show results within this of the best
 RERANK_K = 40              # rerank the top-K cosine candidates
 DEDUP_S = 6.0              # collapse adjacent same-event moments (dense 3s sampling)
@@ -56,6 +56,19 @@ W_EVENT = {"goal": 10, "penalty": 9, "red_card": 8, "assist": 7, "save": 6,
            "corner": 3, "free_kick": 3, "tackle": 3, "offside": 3, "duel": 2,
            "attack": 2, "substitution": 2, "injury": 2, "transition": 1,
            "buildup": 1, "throw_in": 1, "kickoff": 1, "out_of_play": 0, "other": 0}
+
+
+# Set pieces are searched as whole episodes (set-up -> delivery -> outcome).
+SET_PIECES = ("corner", "free_kick", "penalty")
+OUTCOME_RANK = {"shot": 1, "save": 2, "goal": 3}
+SP_GAP_S = 6.0     # set-piece frames this close belong to one episode
+OUTCOME_S = 10.0   # look this far past the last set-piece frame for the outcome
+
+STOPWORDS = {"a", "an", "the", "in", "on", "of", "to", "for", "from", "by", "at",
+             "and", "or", "with", "into", "is", "are", "that", "this", "it",
+             "show", "me", "find", "all", "any", "moment", "moments", "where",
+             "when", "which", "who", "led", "leads", "leading", "resulted",
+             "resulting", "ended", "box", "area"}
 
 
 # ---- stateless helpers -----------------------------------------------------
@@ -130,6 +143,54 @@ class Clip:
                 mat[i] = v
         self.matn = mat / np.clip(np.linalg.norm(mat, axis=1, keepdims=True), 1e-9, None)
         self.clusters, self._canon = self._build_players()
+        self.episodes = self._build_episodes()
+        sp = DATA / "clips" / name / "search.json"
+        self.no_match = (json.loads(sp.read_text())["no_match_threshold"] if sp.exists()
+                         else NO_MATCH_THRESHOLD)
+        self.receptions = d.get("receptions", [])  # video-native, with body shape
+        lp = DATA / "clips" / name / "lineup.json"
+        self.squad = ([n for t in json.loads(lp.read_text())["teams"] for n in t["numbers"].values()]
+                      if lp.exists() else [])
+
+    def named_player(self, ql):
+        """Squad player named in the query (full name or surname), else None."""
+        for n in self.squad:
+            if n.lower() in ql or (len(n.split()[-1]) >= 4 and _has_phrase(ql, n.split()[-1].lower())):
+                return n
+        return None
+
+    def _build_episodes(self):
+        """Group set-piece frames into one episode with its outcome.
+
+        A corner is not five separate 3-second moments: it is set-up, delivery and
+        what happened next. A run of same-type set-piece frames (gaps <= SP_GAP_S)
+        is one episode; the outcome is the most decisive event in the OUTCOME_S
+        seconds after the last frame, before the next set piece starts."""
+        M = sorted(self.moments, key=lambda m: m["t_seconds"])
+        eps, i = [], 0
+        while i < len(M):
+            ev = M[i].get("event")
+            if ev not in SET_PIECES:
+                i += 1
+                continue
+            j = i
+            while (j + 1 < len(M) and M[j + 1].get("event") == ev
+                   and M[j + 1]["t_seconds"] - M[j]["t_seconds"] <= SP_GAP_S):
+                j += 1
+            end_t, outcome, out_m, k = M[j]["t_seconds"], "cleared", None, j + 1
+            while k < len(M) and M[k]["t_seconds"] - end_t <= OUTCOME_S \
+                    and M[k].get("event") not in SET_PIECES:
+                e = M[k].get("event")
+                if e in OUTCOME_RANK and (out_m is None or OUTCOME_RANK[e] > OUTCOME_RANK[outcome]):
+                    outcome, out_m = e, M[k]
+                k += 1
+            frames = M[i:j + 1]
+            eps.append({"type": ev, "frames": frames, "outcome": outcome,
+                        "outcome_moment": out_m,
+                        "start": frames[0]["t_seconds"],
+                        "end": (out_m or frames[-1])["t_seconds"]})
+            i = j + 1
+        return eps
 
     def canon(self, name):
         return self._canon.get(_norm(name).lower())
@@ -198,19 +259,26 @@ class Clip:
         return min(self.moments, key=lambda m: abs(m["t_seconds"] - t))["image"] if self.moments else None
 
 
-# Load every clip that has an index on disk (skip any not yet built).
-CLIP_CONF = [
-    ("clip2", "Arsenal v Manchester United", "clip2.mp4"),
-    ("seed", "Manchester United v Manchester City", "seed.mp4"),
-]
+# Every data/clips/<name>/ with an index.json is a clip; no registration needed.
+def _label(name):
+    d = DATA / "clips" / name
+    if (d / "lineup.json").exists():
+        return " v ".join(t["name"] for t in json.loads((d / "lineup.json").read_text())["teams"])
+    teams = Counter(m.get("teams") for m in json.loads((d / "index.json").read_text())["moments"]
+                    if m.get("teams") not in (None, "unknown"))
+    if not teams:
+        return name
+    # scorebugs abbreviate ("MU vs MC"); prefer the longest common spelling
+    common = [t for t, n in teams.items() if n >= 0.2 * sum(teams.values())]
+    return max(common, key=len).replace(" vs ", " v ")
+
+
 CLIPS = {}
-for _name, _label, _vid in CLIP_CONF:
-    try:
-        CLIPS[_name] = Clip(_name, _label, _vid)
-    except FileNotFoundError:
-        pass
-CLIP_ORDER = [n for n, _, _ in CLIP_CONF if n in CLIPS]
-DEFAULT_CLIP = CLIP_ORDER[0] if CLIP_ORDER else None
+for _p in sorted((DATA / "clips").glob("*/index.json")):
+    _name = _p.parent.name
+    CLIPS[_name] = Clip(_name, _label(_name), json.loads(_p.read_text())["video"])
+CLIP_ORDER = sorted(CLIPS, key=lambda n: CLIPS[n].label)
+DEFAULT_CLIP = os.environ.get("DEFAULT_CLIP") or (CLIP_ORDER[0] if CLIP_ORDER else None)
 
 
 def get_clip(name):
@@ -254,7 +322,7 @@ def keyword_score(m, terms):
     parts = [str(m.get(k, "")) for k in
              ("prose", "event", "phase", "zone_third", "zone_side", "pressure",
               "teams", "score", "card", "card_player", "scorer", "assist",
-              "shot_by", "ocr_text", "commentary")]
+              "shot_by", "ocr_text")]  # never commentary: it says "corner" about the goal frame
     parts += m.get("players", []) or []
     hay = " ".join(parts).lower()
     return sum(1.0 for t in terms if _has_phrase(hay, t))
@@ -274,6 +342,58 @@ EVENT_SYNONYMS = {
     "offside": ["offside", "var"], "throw_in": ["throw in", "throw-in"],
     "celebration": ["celebration", "celebrate", "celebrates"],
 }
+
+
+BODY_TERMS = {"half_turn": ["half turn", "half-turn", "half-turned", "half turned"],
+              "open": ["open body", "opened up", "facing forward", "facing goal"],
+              "back_to_goal": ["back to goal", "back to the goal", "with his back"]}
+RECEIVE_TERMS = ("receive", "receives", "receiving", "received", "reception", "first touch",
+                 "controls", "takes the ball", "gets the ball")
+
+
+def reception_result(c, r, relevance):
+    shape = r["body_shape"].replace("_", "-")
+    who = r["player"] or (f"{r['team']} #{r['number']}" if r["number"] else f"{r['team']} player")
+    return {"t_seconds": r["t_seconds"], "timecode": r["timecode"], "event": "receive",
+            "image": c.nearest_image(r["t_seconds"]), "players": [r["player"]] if r["player"] else [],
+            "prose": f"{who} receives ({shape}, first touch {r.get('first_touch')}, "
+                     f"{r.get('pressure')} pressure). {r.get('detail') or ''}",
+            "relevance": round(float(relevance), 4)}
+
+
+def search_receptions(c, q, ql):
+    """Receptions are filtered on structure (player, body shape) judged from the video,
+    never on commentary. Unidentified receivers can't satisfy a named-player query."""
+    player = c.named_player(ql)
+    # words left after removing reception/body-shape vocabulary name someone; if no
+    # squad player matches them, nobody in this clip can satisfy the query
+    rest = ql
+    for t in RECEIVE_TERMS + tuple(t for ts in BODY_TERMS.values() for t in ts):
+        rest = rest.replace(t, " ")
+    rest = [w for w in re.findall(r"[a-z'-]+", rest) if w not in STOPWORDS and w != "ball"]
+    if rest and not player:
+        return JSONResponse({"results": [], "no_match": True, "query": q, "ranking": "receptions",
+                             "count": 0})
+    shapes = {s for s, ts in BODY_TERMS.items() if any(t in ql for t in ts)}
+    R = [r for r in c.receptions if (not player or r["player"] == player)
+         and (not shapes or r["body_shape"] in shapes)]
+    if not R:
+        return JSONResponse({"results": [], "no_match": True, "query": q, "ranking": "receptions",
+                             "count": 0})
+    results = [reception_result(c, r, r.get("confidence") or 0) for r in R]
+    results.sort(key=lambda x: x["relevance"], reverse=True)
+    return JSONResponse({"results": results, "ranking": "receptions", "count": len(results)})
+
+
+def episode_result(ep, relevance):
+    """One search hit for a whole set piece, anchored on its first frame."""
+    first, out = ep["frames"][0], ep["outcome_moment"]
+    prose = first.get("prose", "")
+    if out is not None:
+        prose += f" Outcome ({out['timecode']}): {out.get('prose', '')}"
+    return {**public(first, relevance), "prose": prose, "outcome": ep["outcome"],
+            "episode_start": ep["start"], "episode_end": ep["end"],
+            "scorer": (out or {}).get("scorer") or first.get("scorer")}
 
 
 def target_events(ql):
@@ -405,8 +525,33 @@ def search(q: str = "", event: str = "", phase: str = "", clip: str = ""):
         idx = [i for i in idx if M[i].get("phase") == phase]
 
     ql = q.lower()
-    terms = [t for t in ql.split() if t]
+    terms = [t for t in re.findall(r"[a-z0-9'-]+", ql) if t not in STOPWORDS]
     targets = target_events(ql)
+
+    if q.strip() and c.receptions and (any(t in ql for t in RECEIVE_TERMS)
+                                        or any(t in ql for ts in BODY_TERMS.values() for t in ts)):
+        return search_receptions(c, q, ql)
+
+    # A query naming a set piece is answered from set-piece EPISODES, judged by
+    # what the frames show. "Corner that led to a goal" also filters on outcome.
+    sp = [t for t in targets if t in SET_PIECES]
+    if q.strip() and sp and not event and not phase:
+        wanted = {t for t in targets if t in OUTCOME_RANK}
+        eps = [e for e in c.episodes if e["type"] in sp
+               and (not wanted or e["outcome"] in wanted)]
+        if not eps:
+            return JSONResponse({"results": [], "no_match": True, "query": q,
+                                 "ranking": "episodes", "count": 0})
+        try:
+            rs = rerank(expand_query(q), [" ".join(_passage(f) for f in e["frames"]) for e in eps])
+            order = sorted(range(len(eps)), key=lambda k: rs.get(k, -1e9), reverse=True)
+            results = [episode_result(eps[k], rs.get(k, 0.0)) for k in order]
+            ranking = "episodes"
+        except Exception:
+            results = [episode_result(e, OUTCOME_RANK.get(e["outcome"], 0)) for e in eps]
+            results.sort(key=lambda r: r["relevance"], reverse=True)
+            ranking = "episodes (unranked)"
+        return JSONResponse({"results": results, "ranking": ranking, "count": len(results)})
     q_search = expand_query(q)  # append a descriptive gloss for tactical terms
     semantic_ok = False
     sims = np.zeros(len(M), dtype=np.float32)
@@ -451,10 +596,10 @@ def search(q: str = "", event: str = "", phase: str = "", clip: str = ""):
             rs = rerank(q_search, passages)
             reranked = sorted(((rs.get(k, -1e9), cand[k]) for k in range(len(cand))), reverse=True)
             best = reranked[0][0] if reranked else -1e9
-            if best < NO_MATCH_THRESHOLD:
+            if best < c.no_match:
                 return JSONResponse({"results": [], "no_match": True, "query": q,
                                      "ranking": "reranked", "count": 0})
-            cutoff = max(NO_MATCH_THRESHOLD, best - SHOW_GAP)  # relative: keep strong queries tight
+            cutoff = max(c.no_match, best - SHOW_GAP)  # relative: keep strong queries tight
             kept = []
             for s, i in reranked:
                 if s < cutoff:
@@ -472,6 +617,9 @@ def search(q: str = "", event: str = "", phase: str = "", clip: str = ""):
 
     if q.strip() and not semantic_ok:
         scored = [(s, i) for s, i in scored if s > 0]
+        if not scored:
+            return JSONResponse({"results": [], "no_match": True, "query": q,
+                                 "ranking": "keyword", "count": 0})
     results = [public(M[i], s) for s, i in scored[:40]]
     return JSONResponse({"results": results,
                          "ranking": "semantic" if semantic_ok else "keyword",

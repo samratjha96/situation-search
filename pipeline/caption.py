@@ -5,10 +5,10 @@ everything in the clip itself:
   1. OCR (PaddleOCR-VL) reads the on-screen text — scorebug (teams, score,
      clock), name graphics, cards, captions. The scorebug is the reliable
      structured signal and detects goals via score change.
-  2. Commentary (local Whisper) is used IF present, else ignored.
-  3. A VLM classifies the sports EVENT (shot, foul, card, attack, goal, ...)
-     and only names a player when the OCR text or commentary supports it, or a
-     jersey number is legible — otherwise it uses '#<number> <shirt colour>'.
+  2. A VLM classifies the sports EVENT (shot, foul, card, attack, goal, ...)
+     from the frames alone. It names a player only from an on-screen name
+     graphic, or a legible shirt number looked up in the clip's squad sheet
+     (lineup.json); otherwise '#<number> <shirt colour>'. Commentary is not used.
      It NEVER guesses names from general football knowledge.
 
 Output: data/clips/<clip>/index.json
@@ -23,6 +23,7 @@ from openai import OpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import (
+    CLIP_DIR,
     EMBED_MODEL,
     FRAMES,
     INTERVAL_S,
@@ -30,43 +31,35 @@ from config import (
     OPENROUTER_API_KEY,
     OPENROUTER_URL,
     OUT,
-    TRANSCRIPT,
     VIDEO_NAME,
     VLM_MODEL,
 )
 
-WIN_BEFORE, WIN_AFTER = 5, 5  # tight: commentary is only a name hint, not the story
 
 # General sports event taxonomy (soccer).
 EVENTS = ("goal|shot|save|foul|yellow_card|red_card|penalty|corner|free_kick|"
           "throw_in|offside|tackle|duel|cross|attack|buildup|transition|"
           "celebration|substitution|injury|kickoff|out_of_play|other")
 
-# VISUAL-FIRST: the frame is the ground truth. Commentary lags (it narrates the
-# past), so it must NOT drive what the moment is or when — it only supplies names
-# for players actually visible in the frame.
+# VISUAL-ONLY: the frames are the ground truth; commentary is never an input.
 PROMPT = (
     "You are a sports video analyst. You get 3 CONSECUTIVE broadcast frames (~3s apart) "
     "of ONE moment; the MIDDLE frame is the moment. Describe ONLY what is VISIBLE across "
     "these frames — they are the ground truth. Use the MOTION across the frames to work "
     "out which team is IN POSSESSION and the direction of play (e.g. who plays a pass "
-    "and to whom). Commentary LAGS and narrates the past, so NEVER describe an action "
-    "just because commentary mentions it; include an action ONLY if you can actually SEE "
-    "it happen across these frames.\n"
-    "You also get on-screen OCR text and (optionally) nearby commentary. Use commentary "
-    "ONLY to attach a name to a player you can clearly SEE — never to decide what is "
-    "happening or when.\n"
+    "and to whom). Include an action ONLY if you can actually SEE it happen.\n"
+    "You also get the on-screen OCR text and the squad sheet (kits, shirt number -> name).\n"
     "GROUNDING RULES:\n"
     "- event: the primary on-ball action VISIBLE right now. If no clear action is visible "
     "(players jogging, a wide shot, a close-up, a replay), use a truthful visible label "
     "(buildup, transition, duel, out_of_play, ...). Do NOT import a shot / goal / switch / "
-    "save from commentary if it is not on screen.\n"
+    "save that is not on screen.\n"
     "- teams and score: from the OCR scorebug if present, else 'unknown'.\n"
-    "- player identity: name a player ONLY if a name is on screen (OCR graphic), a jersey "
-    "number is clearly legible, or the commentary clearly names a player you can SEE. "
+    "- player identity: name a player ONLY if a name is on screen (OCR graphic), or his "
+    "shirt number is clearly legible AND listed for his team in the squad sheet. "
     "Otherwise use '#<number> <shirt colour>' or shirt colour. NEVER guess from football "
-    "knowledge.\n"
-    "- identity_source: name_graphic | jersey_number | commentary | none.\n"
+    "knowledge or from where a player usually plays.\n"
+    "- identity_source: name_graphic | jersey_number | none.\n"
     f"- event is one of: {EVENTS}.\n"
     "Return ONLY a JSON object with keys: event, event_confidence (0-1), "
     "phase (buildup|progression|final_third|transition|set_piece|out_of_play), "
@@ -78,12 +71,8 @@ PROMPT = (
 
 client = OpenAI(base_url=OPENROUTER_URL, api_key=OPENROUTER_API_KEY)
 
-SEGS = json.loads(TRANSCRIPT.read_text())["segments"] if TRANSCRIPT.exists() else []
-
-
-def commentary_window(t: int) -> str:
-    a, b = t - WIN_BEFORE, t + WIN_AFTER
-    return " ".join(s["text"].strip() for s in SEGS if s["end"] >= a and s["start"] <= b)
+_LP = CLIP_DIR / "lineup.json"
+SQUAD = _LP.read_text() if _LP.exists() else "(none: identify by number and shirt colour only)"
 
 
 def img_uri(path: Path) -> str:
@@ -117,9 +106,8 @@ def parse_json(text: str) -> dict:
         return json.loads(repair_json(text[i:]))
 
 
-def caption(paths, commentary: str, ocr: str) -> dict:
-    user = (PROMPT + f"\n\nOCR TEXT (on screen): {ocr or '(none)'}"
-            f"\nCOMMENTARY (around this moment): {commentary or '(none)'}")
+def caption(paths, ocr: str) -> dict:
+    user = PROMPT + f"\n\nOCR TEXT (on screen): {ocr or '(none)'}\nSQUAD SHEET: {SQUAD}"
     content = [{"type": "text", "text": user}] + [
         {"type": "image_url", "image_url": {"url": img_uri(p)}} for p in paths]
     last = None
@@ -196,19 +184,17 @@ def player_str(p):
 def build_moment(i, frames):
     fp = frames[i]
     t = i * INTERVAL_S
-    comm = commentary_window(t)
     ocr = ocr_text(fp)  # scorebug from the moment's (middle) frame
     burst = [frames[max(0, i - 1)], fp, frames[min(len(frames) - 1, i + 1)]]
-    cap = caption(burst, comm, ocr)
+    cap = caption(burst, ocr)
     players = [player_str(p) for p in (cap.get("players") or [])]
     prose = cap.get("prose", "")
-    # embed the VISUAL description (+ visible players + on-screen text) — NOT the
-    # commentary, so search matches what is on screen, not the narration.
+    # embed the visual description + visible players + on-screen text
     embed_text = " ".join([prose, " ".join(map(str, players)), ocr]).strip()
     vec = embed(embed_text) if embed_text else []
     return {
         "id": i, "t_seconds": t, "timecode": timecode(t),
-        "caption_mode": "visual_first_burst",
+        "caption_mode": "visual_only",
         "image": f"frames/{fp.name}",
         "event": cap.get("event", "other"),
         "event_confidence": cap.get("event_confidence"),
@@ -227,7 +213,6 @@ def build_moment(i, frames):
         "identity_source": cap.get("identity_source"),
         "ocr_text": ocr,
         "prose": prose,
-        "commentary": comm,
         "embedding": vec,
     }
 
@@ -239,7 +224,7 @@ def main():
     by_id = {}
     if OUT.exists():
         for m in json.loads(OUT.read_text()).get("moments", []):
-            if m.get("caption_mode") == "visual_first_burst":  # reuse only burst moments
+            if m.get("caption_mode") == "visual_only":  # older modes used commentary: redo
                 by_id[m["id"]] = m
     todo = [i for i in range(len(frames)) if i not in by_id]
     lock = threading.Lock()

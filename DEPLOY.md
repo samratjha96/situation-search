@@ -11,8 +11,11 @@ Run this one time, on a machine with the endpoint, `ffmpeg`, and Whisper:
 
     CLIP_VIDEO=data/clip2.mp4 python pipeline/build.py
 
-This makes `data/clips/clip2/index.json` and puts the frames and a copy of the clip
-in the same directory. A new clip also needs a line in `CLIP_CONF` in `app/server.py`.
+Put the squad sheet at `data/clips/clip2/lineup.json` first if you have one. The
+build makes `data/clips/clip2/index.json` and `search.json` (the clip's no-match
+cutoff) and puts the frames and a copy of the clip in the same directory. The
+server serves every clip it finds under `data/clips/`; set `DEFAULT_CLIP` to choose
+which one opens first.
 
 ## 2. Build the container
 
