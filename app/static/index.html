@@ -15,14 +15,15 @@
   body{margin:0;background:var(--bg);color:var(--txt);
     font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
   header{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;
-    align-items:baseline;gap:12px;background:var(--panel)}
+    align-items:center;gap:20px;background:var(--panel)}
   header h1{margin:0;font-size:17px;letter-spacing:.2px}
-  header .hright{margin-left:auto;display:flex;align-items:center;gap:12px}
-  header .clipwrap{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px}
-  header select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
-    border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;outline:none}
-  header select:focus{border-color:var(--accent)}
-  header .ctx{font-size:12px;color:var(--muted)}
+  header .matches{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  header .matches .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-right:4px}
+  header .match{background:var(--panel2);color:var(--muted);border:1px solid var(--line);border-radius:8px;
+    padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
+  header .match:hover{color:var(--txt);border-color:var(--accent)}
+  header .match.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  header .ctx{margin-left:auto;font-size:12px;color:var(--muted)}
   .wrap{display:grid;grid-template-columns:minmax(430px,1fr) minmax(430px,1fr);
     gap:18px;padding:18px;max-width:1440px;margin:0 auto}
   @media(max-width:920px){.wrap{grid-template-columns:1fr}}
@@ -106,10 +107,8 @@
 <body>
 <header>
   <h1>Situation Search</h1>
-  <div class="hright">
-    <label class="clipwrap">Clip <select id="clipsel"></select></label>
-    <span class="ctx" id="ctx">loading…</span>
-  </div>
+  <div class="matches"><span class="lbl">Match</span><span id="clipsel"></span></div>
+  <span class="ctx" id="ctx">loading…</span>
 </header>
 
 <div class="wrap">
@@ -352,10 +351,11 @@ async function selectPlayer(name,el){
 async function loadClips(){
   const j=await(await fetch('/api/clips')).json();
   const el=document.getElementById('clipsel');
-  el.innerHTML=(j.clips||[]).map(c=>`<option value="${esc(c.name)}">${esc(c.label)}</option>`).join('');
+  el.innerHTML=(j.clips||[]).map(c=>`<button class="match" data-c="${esc(c.name)}">${esc(c.label)}</button>`).join('');
   CLIP=j.default||((j.clips||[])[0]||{}).name||'';
-  el.value=CLIP;
-  el.onchange=()=>{ if(el.value!==CLIP){ CLIP=el.value; switchClip(); } };
+  const mark=()=>el.querySelectorAll('.match').forEach(b=>b.classList.toggle('on',b.dataset.c===CLIP));
+  mark();
+  el.querySelectorAll('.match').forEach(b=>b.onclick=()=>{ if(b.dataset.c!==CLIP){ CLIP=b.dataset.c; mark(); switchClip(); } });
 }
 async function loadClip(){
   const mj=await(await fetch(withClip('/api/clip'))).json();

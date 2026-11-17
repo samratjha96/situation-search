@@ -65,7 +65,7 @@ GOAL_TERMS = ["goal", "goals", "scores", "scored", "scoring"]
 BODY_TERMS = {"half_turn": ["half turn", "half-turn", "half turned", "half-turned"],
               "open": ["open body", "facing forward", "facing goal", "opened up"],
               "back_to_goal": ["back to goal", "back to the goal", "with his back"]}
-OUTCOME_TERMS = {"on_target": ["on target"], "off_target": ["off target", "wide", "misses", "missed"],
+OUTCOME_TERMS = {"on_target": ["on target", "on goal"], "off_target": ["off target", "wide", "misses", "missed"],
                  "blocked": ["blocked"], "saved": ["saved"], "intercepted": ["intercepted"]}
 LED_TO = {"goal": ["led to a goal", "lead to a goal", "leading to a goal", "resulted in a goal", "scored from"],
           "shot": ["led to a shot", "lead to a shot", "leading to a shot", "resulted in a shot"]}
@@ -233,7 +233,8 @@ def search_clip(c, q):
     sp, pat = matched(ql, SET_PIECE_TERMS), matched(ql, PATTERN_TERMS)
     acts, led = matched(ql, ACTION_TERMS), matched(ql, LED_TO)
     shapes, outcomes = matched(ql, BODY_TERMS), matched(ql, OUTCOME_TERMS)
-    wants_goal = any(phrase(ql, g) for g in GOAL_TERMS) and not led and "goal_kick" not in acts
+    wants_goal = any(phrase(ql, g) for g in GOAL_TERMS) and not led and "goal_kick" not in acts \
+        and not phrase(ql, "on goal")  # "shot on goal" = on target, not scored
 
     # 2a. set pieces as episodes, optionally filtered on what they led to
     if sp:
@@ -267,6 +268,8 @@ def search_clip(c, q):
             acts = acts | {"receive"}
         if wants_goal:
             outcomes = outcomes | {"goal"}
+        if "on_target" in outcomes:  # a shot on target is saved, scores, or is logged as on target
+            outcomes = outcomes | {"saved", "goal"}
         hits = [a for a in c.actions if a["action"] in acts and (not team or a["team"] == team)
                 and (not player or a["player"] == player)
                 and (not shapes or a.get("body_shape") in shapes)
