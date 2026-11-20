@@ -1,145 +1,97 @@
 # Situation Search
 
-**Live demo:** https://situsearch.bootloop.cc
+Search football video for a passage of play and play it from the initiating
+action through the outcome. Each structured result includes the observations
+and timestamps that satisfied the query. Search uses the local clip index and
+runs without an inference service or API key.
 
-A football analyst spends hours scrubbing match video to find one moment.
-Situation Search removes the scrubbing. The analyst types what they want to see,
-such as "corner that led to a goal", "receiving on the half turn" or a player's
-name, and the app goes to those moments in the clip. If nothing matches, it says
-so.
+## Run the app
 
-Vision models do all the perceiving. Everything after them is a fixed,
-inspectable processing pipeline. The app uses no commentary, no captions, and no
-hand-made squad sheet.
-
-The demo runs on two public highlight reels:
-[Manchester United v Manchester City](https://www.youtube.com/watch?v=mHcRPO21qlE)
-and [Arsenal v Manchester United](https://www.youtube.com/watch?v=8I4Vov6p1jI).
-Nothing in the pipeline is specific to these clips, to broadcasts, or to
-footage with a scoreboard.
-
-## What it does
-
-- **Player reels.** Search a name ("Kobbie Mainoo", "Saka") to get every snippet
-  where that player is on the ball. "Play reel" plays them back to back.
-- **Set pieces with outcomes.** "corner that led to a goal" returns each corner as
-  one episode (delivery to outcome) and filters on the outcome.
-- **Actions with detail.** "receiving on the half turn", "Fernandes receiving the
-  ball", "shot on target", "goalkeeper diving save".
-- **Patterns.** "switch of play" and "counter attack", derived from where actions
-  start and end.
-- **Goals.** One per scoreboard change, credited to the last shot before it.
-- **Free text.** Anything else ("a long ball over the top") is matched against
-  the vision model's description of each action, and returns "no match" below a
-  per-clip cutoff ("recipe for pasta").
-
-## How it works
-
-### Indexing (offline, once per clip): `pipeline/build.py`
-
-| Step | Kind | What happens |
-|---|---|---|
-| 1. frames | ffmpeg | A thumbnail every 3 s. |
-| 2. vision | vision model | **Team survey:** frames from across the clip; the model names both sides (from the scoreboard, or by kit or bib colour) and describes each kit. **Action log:** 6 s windows every 3 s, slowed to half speed so the model's ~1 fps sampling sees ~2 fps of play. For each window: shot type (live, replay, close-up, ...), every on-ball action (time, action, team, shirt number or name *if read*, body shape on receptions, start and end zones, pass length, outcome, pressure, a one-sentence description), and every shirt it can read, replays included. |
-| 3. scoreboard | OCR model | The top of every frame. Footage without a scoreboard just yields no scores. |
-| 4. track | football detector, local | Roboflow's football-trained YOLOv8 boxes players, keepers, referees and the ball on every 2nd frame of live play; ByteTrack links boxes into tracks, restarting at each gap so camera cuts never join two players. Each box keeps its torso colour. Runs on the laptop GPU (about 5 frames/s, 1 GB). |
-| 5. process | fixed | Roster, dedup, goals, set pieces, patterns (below). |
-| 6. identity | vision model | For each action: 5 full-resolution frames over ±1 s, the model boxes the player doing it, the box is cropped and enlarged 6x, and the model reads the number and shirt colour from the crops alone. |
-| 7. process | fixed | With the crop reads; each action is matched to a player track. |
-| 8. track_read | vision model | For each acting track still without a number: up to 6 crops along the track (largest boxes first) read in one call. A player shows his back at some point of the track even if not at the action. |
-| 9. process | fixed | With the track reads. |
-| 10. embed | embedding model | The action descriptions, for free-text search. |
-| 11. calibrate | fixed + reranker | The per-clip "no match" cutoff. |
-
-**Fixed processing** (`pipeline/process.py`, no model calls):
-
-- **Roster.** Majority vote over every shirt read: a number becomes a name after at
-  least 2 sightings and 60% of that number's votes, and a name keeps only its most
-  seen number. On the Arsenal clip this produced 27 correct pairs without a squad
-  sheet.
-- **Tracks.** Boxes are split into two teams by 2-means on torso colour (teams named
-  by which team's actions their boxes belong to), and a track is cut wherever its
-  smoothed team changes: the tracker jumped to another player. Each track's number
-  is a vote over every read that falls on it (2 agreeing, 60%, on the roster).
-- **Identity per action.** In order of preference:
-  1. *crop*: at least 2 crop reads whose shirt colour matches the team agree.
-  2. *track*: the action's player track (the box the identity step drew, else the
-     acting team's player nearest the ball) has a number.
-  3. *shirt*: the action log read it.
-  3. *carried*: a receive followed by a pass, dribble or shot by the same team
-     within 2.5 s is the same player.
-
-  A number missing from a well-populated roster is treated as a misread.
-- **Dedup.** Overlapping windows see each action twice; one copy is kept.
-- **Goals.** Each score increment that holds for 2 reads is a goal. The scorer is
-  the scoring team's last shot or header in the 45 s before it. Without a
-  scoreboard, goals are the ones the vision model saw go in.
-- **Replays.** One score change is one goal. Of the goals the vision model saw
-  near it, only the last sighting before the score changes is live; every other
-  sighting is a replay (often from a high camera that looks live), and the 15 s
-  leading up to it are dropped.
-- **Set pieces.** A corner, free kick or penalty, plus the actions in the next 10 s.
-  The outcome is goal (only if the scoreboard confirms one), save, shot or
-  cleared.
-- **Switch of play.** A long pass or cross from one flank to the other.
-- **Counter-attack.** The ball is won in the defensive or middle third and the same
-  team shoots within 12 s.
-
-### Search (live): `app/server.py`
-
-1. **A name alone** returns the player's reel: each of his actions from 3 s before
-   to 4 s after, with snippets less than 2 s apart merged.
-2. **Football vocabulary** becomes filters on the index: set pieces, patterns,
-   goals, actions, body shape, outcome, team, and player. The reranker orders
-   the hits.
-3. **Anything else** is a semantic search over the action descriptions, then
-   reranking, then the clip's cutoff.
-
-## Run it
+From the project root:
 
 ```bash
-# Build any clip; re-running skips finished work.
-CLIP_VIDEO=data/clip2.mp4 python pipeline/build.py   # -> data/clips/clip2/
-./run_server.sh          # serves every data/clips/<clip>/index.json; http://127.0.0.1:8008
+./run_server.sh
 ```
 
-The endpoint URL, key and model routes come from a git-ignored `.env` (see
-`.env.example`). For Docker and hosting, see `DEPLOY.md`.
+Open http://127.0.0.1:8008. The launcher uses uv to resolve Python dependencies
+from `requirements.txt`. Once the wheels are cached,
+`UV_OFFLINE=1 ./run_server.sh` runs with dependency downloads disabled.
+Videos and indexes live under `data/clips/<clip>/` and are git-ignored.
+The two local evaluation clips are Manchester United v Manchester City
+(`seed`) and Arsenal v Manchester United (`clip2`).
 
-## Models
+## Search
 
-| Role | Model |
-|------|-------|
-| Team survey, action log, crop and track identity | Gemini 4 Argon |
-| Player and ball detection | Roboflow football YOLOv8 (local) |
-| Tracking | ByteTrack (supervision 0.25.1, local) |
-| Scoreboard OCR | PaddleOCR-VL |
-| Action description embeddings | NV-EmbedQA 1B |
-| Reranker | NV-RerankQA 1B |
+| Query | Evidence used |
+|---|---|
+| Live Arsenal corner followed by a saved shot | A live delivery, continuation of play, the attacking shot, and its outcome |
+| Corner that ended in a goal by Merino | A corner, a linked goal and the scorer's identity |
+| Corner that did not lead to a goal | The terminal outcome of the corner passage |
+| Manchester United regain possession, advance and shoot | A regain, a later progressive action, and a same-team shot |
+| Goalkeeper saves a header | A headed attempt linked to the opposing keeper’s save |
+| Switch of play followed by a shot | A long delivery across the pitch and a later attempt in the same attack |
+| Long passes under tight pressure | Length and pressure on the same indexed pass |
+| Saka | A reel of identified touches and goals |
 
-Model choices were tested against frames checked by eye (see `EVAL.md`). Cosmos 3
-Super Reasoner and Cosmos 3.5 Ultra read the scoreboard correctly but produced
-made-up action lists on the same window, so they are not used.
+The query parser distinguishes taker, shooter, scorer, and keeper. It matches
+team aliases and checks action order. A request containing an unsupported
+condition, such as an off-ball run drawing a defender away, is labeled
+unverified. Local description hits or optional visual candidates can help an
+analyst inspect the footage. They do not establish a verified tactical claim.
 
-## Limitations
+`GET /api/search?q=...&clip=...` searches a match.
+`diagnostics=true` includes candidate spans before the final conditions.
+`GET /api/visual-search?q=...&clip=...` retrieves review candidates using a
+separate local frame index.
 
-- **Identity depends on seeing the back of the shirt.** On the Arsenal clip, 108 of
-  162 live actions have a player number. Tracks are short (median 1.6 s, because
-  of camera cuts and ID switches), which limits how far one good read reaches; a
-  player's reel still shows only part of his involvement (Mainoo: 4 actions).
-- **The tracking weights are AGPL-3.0** (Ultralytics YOLOv8). Fine for a demo;
-  check before any commercial use.
-- **The boxed player is not always the one acting.** Readings on the crops were
-  right in an 8-crop audit, but in one crop two players overlapped.
-- **Zones and pitch geometry are the vision model's estimate.** No pitch-keypoint
-  model is used.
-- **Highlight reels are mostly replays and close-ups.** Full-match footage gives
-  far more live play.
-- **The footage is a copyrighted highlight reel.** A public build needs licensed
-  footage.
+## Build from saved observations
 
-## Stack
+The default build runs deterministic processing on the clip's existing
+`vision.json`, using any available track, shirt-read, and scoreboard artifacts.
+It rebuilds the action index and passages without calling a model endpoint:
 
-FastAPI and vanilla JS. `ffmpeg` for cutting and cropping. NumPy for the cosine
-search. Docker for deploy. All model inference runs on an OpenRouter-style
-endpoint.
+```bash
+CLIP_VIDEO=data/clips/clip2/clip2.mp4 uv run --no-project python pipeline/build.py
+CLIP_VIDEO=data/clips/seed/seed.mp4 uv run --no-project python pipeline/build.py
+```
+
+The action index retains timestamps, observation sources, and available player
+identities. Set pieces can continue through a deflection or recycled possession.
+The possession index links attempts to observed opposing saves within three seconds.
+A switch can continue through a defensive clearance when the delivering team
+visibly receives the loose ball within four seconds and the opponent has no
+controlled action in between. A goalkeeper gathering a loose ball supplies
+no shot evidence on its own.
+A restart, observed opposition possession, gap, or non-live segment ends the
+passage. A counterattack requires a defensive or midfield regain followed by
+progression and a shot. Attacking-third regains are separately indexed.
+Content-addressed reviews in `pipeline/reviews/` can correct a replay or
+supply a verified observation for the matching video. Coverage on other
+videos depends on the quality of their extracted observations.
+
+Optional visual retrieval needs the locally provisioned CLIP model in
+`data/models/clip-search/`, including `tokenizer.json`,
+`preprocessor_config.json`, and both quantized ONNX encoders in `onnx/`.
+Build the frame indexes locally with:
+
+```bash
+uv run --no-project --with-requirements requirements.txt python pipeline/visual_index.py
+```
+
+## Extract observations for new footage
+
+`pipeline/build.py --extract-with-endpoint` runs the original video ingestion
+workflow. Its vision and OCR stages send video windows, images, and player
+crops to the inference endpoint configured by the operator. Use the saved-
+observation workflow above for local-only rebuilding. For footage authorized
+for the configured endpoint, ingestion requires ffmpeg, the football detector
+at `data/models/football-player-detection.pt`, and the endpoint settings shown
+in `.env.example` exported in the process environment.
+
+The extraction stages survey team kits, log on-ball actions and field zones,
+read the scoreboard, run a local detector and ByteTrack, and identify actors
+from shirt crops and track votes. A missing shirt number or a camera cut can
+leave a participant unknown. Broadcast highlights also contain replays, which
+can be mislabeled as live play.
+
+[Evaluation and local model experiments](EVAL.md) · [Container instructions](DEPLOY.md)

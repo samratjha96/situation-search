@@ -1,0 +1,10 @@
+{"video":"data/clips/seed/seed.mp4","start":118,"end":131,"query":"Manchester United regain possession, advance and shoot","expected":[[119,130]]}
+{"video":"data/clips/seed/seed.mp4","start":80,"end":90,"query":"Manchester United regain possession, advance and shoot","expected":[]}
+{"video":"data/clips/seed/seed.mp4","start":118,"end":131,"query":"Manchester City regain possession, advance and shoot","expected":[]}
+{"video":"data/clips/clip2/clip2.mp4","start":532,"end":553,"query":"Manchester United regain possession, advance and shoot","expected":[]}
+{"video":"data/clips/seed/seed.mp4","query":"Which off-ball run pulled the centre-back away before the cross?","expected_status":"unverified"}
+{"video":"data/clips/clip2/clip2.mp4","query":"Show the decoy run that dragged a defender away before the shot","expected_status":"unverified"}
+{"video":"data/clips/clip2/clip2.mp4","start":5,"end":11,"query":"goalkeeper saves a header","expected":[[6,9]]}
+{"video":"data/clips/clip2/clip2.mp4","start":42,"end":54,"query":"switch of play followed by a shot","expected":[[43,53]]}
+{"video":"data/clips/seed/seed.mp4","start":105,"end":116,"query":"switch of play followed by a shot","expected":[]}
+{"video":"data/clips/seed/seed.mp4","start":245,"end":256,"query":"switch of play followed by a shot","expected":[[247.8,255.0]]}

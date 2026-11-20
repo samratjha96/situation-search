@@ -1,0 +1,15 @@
+{"video": "data/clips/clip2/clip2.mp4", "start": 340, "end": 364, "query": "Arsenal corner that led to a goal", "expected": []}
+{"video": "data/clips/clip2/clip2.mp4", "start": 365, "end": 380, "query": "Arsenal corner that led to a goal", "expected": []}
+{"video": "data/clips/clip2/clip2.mp4", "start": 380, "end": 395, "query": "Arsenal corner that led to a goal", "expected": [[383, 388]]}
+{"video": "data/clips/clip2/clip2.mp4", "start": 455, "end": 470, "query": "Arsenal corner that led to a goal", "expected": []}
+{"video": "data/clips/clip2/clip2.mp4", "start": 340, "end": 364, "query": "Live Arsenal corner followed by a saved shot", "expected": [[346, 362]]}
+{"video": "data/clips/clip2/clip2.mp4", "start": 365, "end": 380, "query": "Live Arsenal corner followed by a saved shot", "expected": []}
+{"video": "data/clips/clip2/clip2.mp4", "start": 455, "end": 470, "query": "Live Arsenal corner followed by a saved shot", "expected": []}
+{"video": "data/clips/clip2/clip2.mp4", "start": 455, "end": 470, "query": "Manchester United scores from open play", "expected": [[458, 466]]}
+{"video": "data/clips/clip2/clip2.mp4", "start": 380, "end": 395, "query": "Manchester United scores from open play", "expected": []}
+{"video": "data/clips/clip2/clip2.mp4", "start": 380, "end": 395, "query": "Arsenal corner that ended in a goal", "expected": [[383, 388]]}
+{"video": "data/clips/clip2/clip2.mp4", "start": 340, "end": 364, "query": "Arsenal corner that did not lead to a goal", "expected": [[346, 362]]}
+{"video": "data/clips/clip2/clip2.mp4", "start": 380, "end": 395, "query": "Arsenal corner that did not lead to a goal", "expected": []}
+{"video": "data/clips/seed/seed.mp4", "start": 96, "end": 118, "query": "Manchester United crosses from the right wing towards the far side of the penalty area", "expected": [[106.5, 110]]}
+{"video": "data/clips/seed/seed.mp4", "start": 80, "end": 90, "query": "Manchester United crosses from the right wing towards the far side of the penalty area", "expected": []}
+{"video": "data/clips/seed/seed.mp4", "start": 90, "end": 96, "query": "Manchester United crosses from the right wing towards the far side of the penalty area", "expected": []}

@@ -1,0 +1,10 @@
+{
+  "excluded": [
+    {"start": 360, "end": 363, "kind": "corrected", "detail": "The wide shot ends with Saka shooting and the goalkeeper saving. The vision log describes a receive and pass here."},
+    {"start": 365, "end": 380, "kind": "replay", "live_start": 356, "live_end": 362, "detail": "A high-angle replay and then a close replay show the preceding Saka shot and save."}
+  ],
+  "observations": [
+    {"t": 360.5, "action": "shot", "team": "ARS", "player": "Saka", "number": "7", "outcome": "saved", "detail": "Saka shoots after Arsenal recycles the corner on the right. His number is visible in the replay."},
+    {"t": 361.5, "action": "save", "team": "MU", "outcome": "completed", "detail": "The United goalkeeper dives and saves the shot. The replay shows contact with the ball."}
+  ]
+}

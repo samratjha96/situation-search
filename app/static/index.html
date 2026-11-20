@@ -101,6 +101,12 @@
   .plist .pn{flex:1}.plist .st{font-size:11px;color:var(--muted)}
   .g{color:var(--gold);font-weight:600}
   .note{font-size:11px;color:var(--muted);margin:2px 0 8px}
+  .evidence{padding-left:0;list-style:none;margin:7px 0 0;font-size:12px}
+  .evidence-line{margin-top:4px}.evidence-time{color:var(--muted);margin-right:6px}
+  button.row{font:inherit;text-align:left;background:transparent;color:inherit}
+  button.row:focus-visible{outline:2px solid var(--accent)}
+  .passage-prose,.evidence,.evidence-line{display:block}
+  .passage-prose{margin-top:4px;font-size:12px}.source{color:var(--muted);font-size:11px}
   .empty{padding:26px;text-align:center;color:var(--muted)}
 </style>
 </head>
@@ -131,9 +137,10 @@
     </div>
 
     <div class="pane active" id="pane-search">
-      <input id="q" type="text" placeholder="Search this match" autocomplete="off"/>
+      <input id="q" aria-label="Search this match" type="text" placeholder="Search this match" autocomplete="off"/>
       <div class="filters" id="examples" style="margin-top:11px"></div>
-      <div class="note" id="srnote"></div>
+      <div class="note" id="srnote" role="status"></div>
+      <button class="chip" id="visual" hidden>Find visually similar passages</button>
       <div class="list" id="srlist"></div>
     </div>
 
@@ -173,7 +180,7 @@ const withClip=q=>`${q}${q.includes('?')?'&':'?'}clip=${encodeURIComponent(CLIP)
 const PREROLL=1;
 
 function jump(t,id){
-  sel=id; video.currentTime=Math.max(0, t-PREROLL); video.play().catch(()=>{});
+  REEL=null; sel=id; video.currentTime=Math.max(0, t-PREROLL); video.play().catch(()=>{});
   document.querySelectorAll('.mk').forEach(m=>m.classList.toggle('sel',m.dataset.id==id));
   document.querySelectorAll('.row').forEach(r=>r.classList.toggle('sel',r.dataset.id==id));
 }
@@ -265,44 +272,67 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
 });
 
 // ---- search ----
-const EXAMPLES=["counter attack","switch of play","shot on goal","goalkeeper diving save","corner in the box","build-up from the back"];
-let timer=null;
-let searchSeq=0;
-async function doSearch(){
+const EXAMPLES=["live corner followed by a saved shot","regain possession, advance and shoot","corner that ended in a goal","long passes under tight pressure","switch of play"];
+let timer=null, searchSeq=0;
+const visualButton=document.getElementById('visual');
+
+function evidenceList(row){
+  if(!row.evidence?.length || (row.evidence.length===1 && !row.evidence[0].source)) return '';
+  return '<span class="evidence">'+row.evidence.map(e=>{
+    const source=e.source==='reviewed_video'?' · Video review':e.source==='scoreboard'?' · Scoreboard':'';
+    return `<span class="evidence-line"><span class="evidence-time">${fmt(e.t)}</span>${esc(e.detail)}<span class="source">${source}</span></span>`;
+  }).join('')+'</span>';
+}
+function renderPassages(box,rows){
+  box.innerHTML=rows.map(m=>`
+    <button type="button" class="row" aria-label="Play passage: ${esc(m.prose)} at ${esc(m.timecode)}">
+      <img loading="lazy" alt="" src="/media/${esc(m.image)}"/>
+      <span><span class="top">${badge(m.event,color(m.event))}
+        ${m.outcome?badge(m.outcome,color(m.outcome)):''}
+        ${m.scorer?`<span class="pchip">⚽ ${esc(m.scorer)}</span>`:''}
+        <span class="tc">${esc(m.timecode)} – ${fmt(m.episode_end)}</span></span>
+        <span class="passage-prose">${esc(m.prose)}</span>${evidenceList(m)}</span>
+    </button>`).join('');
+  box.querySelectorAll('.row').forEach((button,i)=>{
+    const m=rows[i];
+    button.onclick=()=>playReel([[m.t_seconds,m.episode_end]]);
+  });
+}
+async function doSearch(visual=false){
   const q=document.getElementById('q').value;
   const box=document.getElementById('srlist');
   const note=document.getElementById('srnote');
   const seq=++searchSeq;
+  visualButton.hidden=true;
   box.classList.add('loading');
-  note.innerHTML=`<span class="spin"></span>Searching…`;
+  note.textContent=visual?'Searching video frames…':'Searching…';
   let j;
-  try{ j=await(await fetch(withClip(`/api/search?q=${encodeURIComponent(q)}`))).json(); }
-  catch(e){ if(seq===searchSeq){ box.classList.remove('loading'); note.textContent='Search failed.'; } return; }
-  if(seq!==searchSeq) return;            // a newer search superseded this one
-  box.classList.remove('loading');
-  if(!j.results.length){
-    box.innerHTML=j.no_match
-      ? `<div class="empty">No match for <b>“${esc(q)}”</b>.</div>`
-      : `<div class="empty">No results.</div>`;
-    note.textContent = '';
+  try{
+    const path=visual?'visual-search':'search';
+    const response=await fetch(withClip(`/api/${path}?q=${encodeURIComponent(q)}`));
+    if(!response.ok) throw new Error('Request failed');
+    j=await response.json();
+  }catch{
+    if(seq===searchSeq){box.replaceChildren(); box.classList.remove('loading'); note.textContent='Search failed. Please retry.';}
     return;
   }
-  const maxs=Math.max(...j.results.map(r=>r.relevance||0),1e-6);
-  box.innerHTML=j.results.map(m=>`
-    <div class="row" data-t="${esc(m.t_seconds)}">
-      <img loading="lazy" src="/media/${esc(m.image)}"/>
-      <div><div class="top">${badge(m.event,color(m.event))}
-        ${m.outcome?badge('→ '+m.outcome,color(m.outcome==='cleared'?'other':m.outcome)):''}
-        ${m.scorer?`<span class="pchip">⚽ ${esc(m.scorer)}</span>`:''}
-        <span class="tc">${esc(m.timecode)}${m.episode_end!=null?' – '+fmt(m.episode_end):''}</span></div><p>${esc(m.prose)}</p></div></div>`).join('');
-  box.querySelectorAll('.row').forEach(el=>el.onclick=()=>jump(+el.dataset.t,null));
-  note.textContent=`${j.results.length} result${j.results.length===1?'':'s'}`;
-  if(j.reel&&j.reel.length){
-    const secs=j.reel.reduce((a,[s,e])=>a+e-s,0);
-    note.innerHTML=`${j.reel.length} snippets · ${fmt(secs)} <button class="reelbtn" id="reelbtn">▶ Play reel</button>`;
+  if(seq!==searchSeq) return;
+  box.classList.remove('loading');
+  visualButton.hidden=visual || !q.trim();
+  if(!j.results.length){
+    box.replaceChildren();
+    note.textContent=j.message || `No indexed match for “${q}”.`;
+    return;
+  }
+  note.textContent=j.message || `${j.count} ${j.count===1?'match':'matches'}`;
+  renderPassages(box,j.results);
+  if(j.reel?.length){
+    const seconds=j.reel.reduce((sum,[start,end])=>sum+end-start,0);
+    note.innerHTML=`${j.reel.length} snippets · ${fmt(seconds)} <button class="reelbtn" id="reelbtn">▶ Play reel</button>`;
     document.getElementById('reelbtn').onclick=()=>playReel(j.reel);
   }
 }
+visualButton.onclick=()=>doSearch(true);
 
 // Play [start,end] snippets back to back; any manual seek or pause ends the reel.
 let REEL=null;
@@ -312,20 +342,22 @@ video.addEventListener('timeupdate',()=>{
   const [s,e]=REEL.segs[REEL.i];
   if(video.currentTime<s-1.5){ REEL=null; return; }
   if(video.currentTime>=e){
-    if(++REEL.i>=REEL.segs.length){ REEL=null; video.pause(); return; }
+    if(++REEL.i>=REEL.segs.length){ REEL=null; video.pause(); video.currentTime=e; return; }
     video.currentTime=REEL.segs[REEL.i][0];
   }
 });
 video.addEventListener('seeking',()=>{
   if(REEL){ const [s,e]=REEL.segs[REEL.i]; if(video.currentTime<s-1.5||video.currentTime>e+1.5) REEL=null; }
 });
-document.getElementById('q').addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(doSearch,280);});
-document.getElementById('examples').innerHTML=EXAMPLES.map(e=>`<span class="chip">${esc(e)}</span>`).join('');
+document.getElementById('q').addEventListener('input',()=>{clearTimeout(timer); ++searchSeq; visualButton.hidden=true; timer=setTimeout(doSearch,280);});
+document.getElementById('examples').innerHTML=EXAMPLES.map(e=>`<button class="chip">${esc(e)}</button>`).join('');
 document.querySelectorAll('#examples .chip').forEach(c=>c.onclick=()=>{document.getElementById('q').value=c.textContent;doSearch();});
 
 // ---- players ----
 async function loadPlayers(){
+  const selected=CLIP;
   const j=await(await fetch(withClip('/api/players'))).json();
+  if(CLIP!==selected) return;
   document.getElementById('plist').innerHTML=j.players.map(p=>{
     const st=[p.goals?`<span class="g">⚽${p.goals}</span>`:'',p.assists?`🅰${p.assists}`:'',
       p.shots?`Sh${p.shots}`:''].filter(Boolean).join(' ')||`${p.appearances} actions`;
@@ -334,18 +366,15 @@ async function loadPlayers(){
   document.querySelectorAll('#plist .prow').forEach(el=>el.onclick=()=>selectPlayer(decodeURIComponent(el.dataset.n),el));
 }
 async function selectPlayer(name,el){
+  const selected=CLIP;
   document.querySelectorAll('#plist .prow').forEach(x=>x.classList.toggle('sel',x===el));
   const j=await(await fetch(withClip(`/api/player?name=${encodeURIComponent(name)}`))).json();
+  if(CLIP!==selected || !el.classList.contains('sel')) return;
   const s=j.stats;
   document.getElementById('prnote').innerHTML=`<b>${esc(j.name)}</b> — ${s.goals||0} goals · ${s.shots||0} shots · ${s.appearances||0} actions`+
     (j.reel.length?` <button class="reelbtn" id="preelbtn">▶ Play reel</button>`:'');
   if(j.reel.length) document.getElementById('preelbtn').onclick=()=>playReel(j.reel);
-  const box=document.getElementById('prlist');
-  box.innerHTML=j.moments.map(m=>`
-    <div class="row" data-t="${esc(m.t_seconds)}"><img loading="lazy" src="/media/${esc(m.image)}"/>
-    <div><div class="top">${badge(m.event,color(m.event))}<span class="tc">${esc(m.timecode)}${m.episode_end!=null?' – '+fmt(m.episode_end):''}</span></div>
-    <p>${esc(m.prose)}</p></div></div>`).join('');
-  box.querySelectorAll('.row').forEach(x=>x.onclick=()=>jump(+x.dataset.t,null));
+  renderPassages(document.getElementById('prlist'),j.moments);
 }
 
 async function loadClips(){
@@ -358,9 +387,12 @@ async function loadClips(){
   el.querySelectorAll('.match').forEach(b=>b.onclick=()=>{ if(b.dataset.c!==CLIP){ CLIP=b.dataset.c; mark(); switchClip(); } });
 }
 async function loadClip(){
+  const selected=CLIP;
   const mj=await(await fetch(withClip('/api/clip'))).json();
+  if(CLIP!==selected) return;
   video.src=`/media/${mj.video}`;
   const tj=await(await fetch(withClip('/api/timeline'))).json();
+  if(CLIP!==selected) return;
   TL=tj.events.map((e,i)=>({...e,_id:i})); DUR=tj.duration;
   document.getElementById('ctx').textContent=`${TL.length} events`;
   document.getElementById('tlcount').textContent=`· ${TL.length} events · ${tj.confirmed_goals} confirmed goals`;
@@ -368,11 +400,13 @@ async function loadClip(){
   renderFilters();
   document.querySelector('#evfilters .chip[data-t="__notable"]').classList.add('on');
   renderAxis(); renderEvents(); loadPlayers();
-  const q0=new URLSearchParams(location.search).get('q')||'shot on goal';
-  document.getElementById('q').value=q0; doSearch();
+  doSearch();
 }
 function switchClip(){
   // reset per-clip UI state, then reload everything for the newly-selected clip
+  clearTimeout(timer); ++searchSeq; REEL=null; video.pause(); visualButton.hidden=true;
+  document.getElementById('srlist').replaceChildren();
+  document.getElementById('srnote').textContent='';
   sel=null; TL=[]; activeTypes=null;
   document.getElementById('prnote').innerHTML='';
   document.getElementById('prlist').innerHTML='';
@@ -382,7 +416,10 @@ function switchClip(){
   document.getElementById('nowtc').textContent='00:00';
   loadClip();
 }
-async function init(){ await loadClips(); loadClip(); }
+async function init(){
+  document.getElementById('q').value=new URLSearchParams(location.search).get('q')||EXAMPLES[0];
+  await loadClips(); loadClip();
+}
 init();
 </script>
 </body>

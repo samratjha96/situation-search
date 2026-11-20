@@ -23,9 +23,12 @@ present) and writes data/clips/<clip>/index.json:
 
     CLIP_VIDEO=data/clips/clip2/clip2.mp4 python pipeline/process.py
 """
+import hashlib
 import json
+import os
 import re
 import sys
+import tempfile
 import unicodedata
 from bisect import bisect_left
 from collections import Counter, defaultdict
@@ -33,6 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import CLIP_DIR, FRAMES, INTERVAL_S
+from passages import derive, distinct_actions
 
 ROSTER_MIN_VOTES, ROSTER_MIN_SHARE = 2, 0.6
 ROSTER_TRUSTED = 8    # with this many shirts read for a team, numbers off its roster are misreads
@@ -43,9 +47,6 @@ CARRY_S = 2.5         # receive -> next action by the same team this soon = the 
 CARRY_FROM = ("receive", "dribble", "interception", "tackle")  # he now has the ball
 CARRY_NEXT = ("pass", "dribble", "shot", "header", "cross")
 DEDUP_S = 1.5          # same action by the same team this close = one action seen twice
-SET_PIECES = ("corner", "free_kick", "penalty")
-OUTCOME_S = 10.0       # how long after a set piece its outcome is looked for
-COUNTER_S = 12.0       # ball won -> shot by the same team within this = counter-attack
 LIVE = ("live_wide", "live_close")
 SCOREBOARD_MIN_SHARE = 0.5  # below this share of frames with a score, there is no scoreboard
 GOAL_LOOKBACK_S = 45
@@ -108,6 +109,7 @@ def actions_from(vision, teams):
                         "shirt_name": a.get("shirt_name"), "body_shape": a.get("body_shape"),
                         "start": a.get("start"), "end": a.get("end"), "length": a.get("length"),
                         "outcome": a.get("outcome"), "pressure": a.get("pressure"),
+                        "source": "vision", "window_starts": [w["start"]],
                         "confidence": a.get("confidence_0_1") or 0, "detail": a.get("detail") or ""})
     return out
 
@@ -121,6 +123,7 @@ def dedup(actions):
         if twin is None:
             kept.append(dict(a))
         else:  # same action seen from the other window: keep any shirt it read
+            twin["window_starts"] = sorted(set(twin["window_starts"] + a["window_starts"]))
             twin["number"] = twin["number"] or a["number"]
             twin["shirt_name"] = twin["shirt_name"] or a["shirt_name"]
     kept.sort(key=lambda x: x["t"])
@@ -313,49 +316,26 @@ def carry(actions):
                     dst.update(number=src["number"], player=src["player"], identity_source="carried")
 
 
-def side(z):
-    return (z or {}).get("side") if isinstance(z, dict) else None
-
-
-def derive(actions):
-    episodes, patterns = [], []
-    for i, a in enumerate(actions):
-        if a["action"] in SET_PIECES:
-            if episodes and episodes[-1]["type"] == a["action"] and a["t"] - episodes[-1]["start"] <= 8:
-                continue  # set-up and delivery of the same set piece
-            follow = [b for b in actions[i + 1:] if b["t"] - a["t"] <= OUTCOME_S]
-            nxt = next((b for b in follow if b["action"] in SET_PIECES), None)
-            if nxt:
-                follow = [b for b in follow if b["t"] < nxt["t"]]
-            rank = {"goal": 3, "save": 2, "shot": 1, "header": 1}
-            best = max(follow, key=lambda b: rank.get(b["action"], 0) + (3 if b["outcome"] == "goal" else 0),
-                       default=None)
-            outcome = "cleared"
-            if best and (best["action"] == "goal" or best["outcome"] == "goal"):
-                outcome = "goal"
-            elif best and best["action"] == "save":
-                outcome = "save"
-            elif best and best["action"] in ("shot", "header") and rank.get(best["action"]):
-                outcome = "shot"
-            episodes.append({"type": a["action"], "team": a["team"], "start": a["t"],
-                             "end": best["t"] if best and outcome != "cleared" else a["t"] + 4,
-                             "outcome": outcome, "taker": a.get("player"), "action_ids": [a["id"]] +
-                             [b["id"] for b in follow]})
-        if a["action"] in ("pass", "cross") and a["length"] == "long" and \
-                {side(a["start"]), side(a["end"])} == {"left", "right"}:
-            patterns.append({"type": "switch_of_play", "team": a["team"], "start": a["t"] - 2,
-                             "end": a["t"] + 4, "action_ids": [a["id"]]})
-        won = (a["action"] in ("interception", "tackle", "save") or
-               (a["action"] == "clearance" and a["outcome"] == "won")) and \
-            (a["start"] or {}).get("third") in ("def", "mid")
-        if won and a["team"]:
-            shot = next((b for b in actions[i + 1:] if b["t"] - a["t"] <= COUNTER_S and b["team"] == a["team"]
-                         and b["action"] in ("shot", "header", "goal")), None)
-            if shot and not any(p["type"] == "counter_attack" and p["end"] == shot["t"] + 3 for p in patterns):
-                patterns.append({"type": "counter_attack", "team": a["team"], "start": a["t"] - 2,
-                                 "end": shot["t"] + 3, "action_ids": [b["id"] for b in actions
-                                                                      if a["t"] <= b["t"] <= shot["t"]]})
-    return episodes, patterns
+def reviewed_observations(actions, video):
+    """Apply video-reviewed corrections bound to the precise footage that was reviewed."""
+    digest = hashlib.sha256()
+    with video.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    review_file = Path(__file__).with_name("reviews") / (digest.hexdigest() + ".json")
+    if not review_file.is_file():
+        return actions, []
+    review = json.loads(review_file.read_text())
+    excluded = review["excluded"]
+    kept = [a for a in actions if not any(r["start"] <= a["t"] < r["end"] for r in excluded)]
+    first_id = max((a["id"] for a in actions), default=-1) + 1
+    for n, observed in enumerate(review["observations"], first_id):
+        a = dict.fromkeys(("shirt_name", "body_shape", "start", "end", "length", "pressure",
+                           "player", "number", "track", "confidence"))
+        a.update(observed, id=n, source="reviewed_video",
+                 identity_source="reviewed_video" if observed.get("player") else "none")
+        kept.append(a)
+    return sorted(kept, key=lambda a: a["t"]), excluded
 
 
 def score_changes(reads):
@@ -436,20 +416,25 @@ def main():
     has_board = sum(1 for r in reads if r["score"]) >= SCOREBOARD_MIN_SHARE * max(len(reads), 1)
     if has_board:
         actions = drop_replays(actions, score_changes(reads), teams)
-    episodes, patterns = derive(actions)
+    actions, reviewed_spans = reviewed_observations(actions, CLIP_DIR / vision["video"])
+    actions = distinct_actions(actions)
     goals = goals_from(reads, actions, teams) if has_board else goals_seen(actions)
-    for e in episodes:  # a set piece "led to a goal" only if the scoreboard says a goal came
-        scored = any(e["start"] <= g["t"] <= e["start"] + OUTCOME_S + 2 and g["team"] == e["team"] for g in goals)
-        e["outcome"] = "goal" if scored else ("shot" if e["outcome"] == "goal" else e["outcome"])
+    breaks = sorted({w["start"] + vision["win_s"] / 2 for w in vision["windows"]
+                     if w["shot_type"] not in LIVE} | {r["start"] for r in reviewed_spans if r["kind"] == "replay"})
+    episodes, patterns, possessions, saves = derive(actions, goals, breaks, vision["duration"])
     frames = sorted(p.name for p in FRAMES.glob("*.jpg"))
     for a in actions:
         a["timecode"] = tc(a["t"])
         a["image"] = f"frames/{frames[min(int(a['t'] // INTERVAL_S), len(frames) - 1)]}" if frames else None
     index = {"video": vision["video"], "duration": vision["duration"], "teams": teams, "roster": roster,
              "frames": [f"frames/{f}" for f in frames], "frame_interval_s": INTERVAL_S,
-             "actions": actions, "episodes": episodes, "patterns": patterns, "goals": goals,
+             "possessions": possessions, "attempt_saves": saves,
+             "actions": actions, "episodes": episodes, "patterns": patterns, "goals": goals, "reviewed_spans": reviewed_spans,
              "track_parts": {a["track"]: tracks.span[a["track"]] for a in actions if a.get("track")} if tracks else {}}
-    (CLIP_DIR / "index.json").write_text(json.dumps(index, indent=1))
+    with tempfile.NamedTemporaryFile("w", dir=CLIP_DIR, prefix=".index-", delete=False) as temp:
+        json.dump(index, temp, indent=1)
+        os.fchmod(temp.fileno(), 0o644)
+    Path(temp.name).replace(CLIP_DIR / "index.json")
     ids = Counter(a["identity_source"] for a in actions)
     print(f"{len(roster)} roster entries, {len(actions)} actions (identity {dict(ids)}), "
           f"{len(episodes)} set pieces, {len(patterns)} patterns, {len(goals)} goals")

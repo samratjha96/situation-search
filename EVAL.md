@@ -3,6 +3,78 @@
 All checks below were made against frames looked at by eye. The clips are the two
 demo highlight reels at 1280x720.
 
+## Local temporal grounding experiment
+
+On 15 visually judged query/window pairs from the two reels, TimeLens2-2B
+returned a span on eight of nine windows where the requested situation was
+absent. A separate yes/no prompt answered yes to all 15. These cases deliberately
+include hard negatives, overlapping footage, and paraphrases. They measure
+specific failure modes and do not estimate accuracy across matches.
+
+| Method | Positive cases with span IoU ≥ 0.5 | Absent cases correctly rejected |
+|---|---:|---:|
+| Current search API, offline structured routes | 3/6 | 6/9 |
+| TimeLens2-2B, local video and original query | 2/6 | 1/9 |
+
+The evaluator judged the full requested move, from delivery to outcome when
+both were requested. For the API comparison, search ran on the whole reel
+and returned episode spans were intersected with each test window. For
+TimeLens2, each test window was decoded at 2 fps and 448 × 256 on Apple MPS.
+The model saw the pixels and query only. The median time per case, including
+decoding and generation but excluding model load, was 6.17 seconds.
+
+Examples from Arsenal v United:
+
+- The first live corner at about 346 s leads to a shot and save around 361 s.
+  The index ends the episode at 351.1 s. At 366.5 s it indexes a replay of
+  the shot as another corner.
+- A separate live corner at about 383 s leads to the equalizer around 387 s.
+  TimeLens2 found it, but also returned 462–469 s for the same query on a
+  clip showing United scoring from open play.
+- We also tried the same scoring-corner query on four overlapping 24-second
+  windows between 336 and 408 s, then on three windows proposed by the
+  index's corner detector. TimeLens2 returned a span in all seven windows,
+  including both incorrect indexed proposals.
+
+The model revision is `MCG-NJU/TimeLens2-2B@10a779b6ef6fc8ad41367db2d1eb6779ca84995a`.
+The SHA-256 of `model.safetensors` is
+`70facd614adbacf7d09bd6e6389ce11ece256e9bb0dcc52194c28882c71c8588`.
+Weights are in `data/models/timelens2-2b/`. Raw local predictions are in
+`data/evals/local-grounding/`. Both directories are git-ignored.
+The reference windows and offline inference runner are in `evals/`.
+
+On macOS with the dependencies already installed, run from the project root:
+
+```bash
+sandbox-exec -p '(version 1)(allow default)(deny network*)' \
+  python evals/local_grounding.py data/models/timelens2-2b evals/corner_cases.jsonl
+```
+
+### Football-specific spotter
+
+We also ran the 2025 SoccerNet Team Ball Action Spotting T-DEED baseline on
+CPU, using three eight-second windows and the published two-head checkpoint.
+This model assigns scores to 12 actions at each timestamp. We summed its two
+team-side scores per action, then took each action's peak within the window.
+The scores below are model outputs, not measured probabilities of correctness.
+
+| Match and window | Observed play | Model output |
+|---|---|---|
+| Arsenal v United, 382–390 s | Arsenal delivers the scoring corner around 383–385 s | Cross at 383.84 s (0.977), shot at 387.52 s (0.202). Goal was outside the top five classes. |
+| United v City, 103–111 s | United crosses from the right around 106.8–107.0 s | Cross at 106.92 s (0.116), ranked fifth by peak score. |
+| United v City, 89–97 s | Midfield circulation | Pass at 91.56 s (0.773), the strongest event. |
+
+This checks timing on selected windows. It does not measure full-match recall,
+identify the taker or scorer, or establish that every detected action belongs
+to the same move. Source: [SoccerNet/sn-teamspotting](https://github.com/SoccerNet/sn-teamspotting).
+
+To rerun the scoring-corner window with the saved local assets:
+
+```bash
+sandbox-exec -p '(version 1)(allow default)(deny network*)' \
+  python evals/local_spotter.py data/models/football-spotter-2025 data/clips/clip2/clip2.mp4 382
+```
+
 ## Model choice for the action log
 
 One 6 s window (Arsenal v Manchester United, 02:00), slowed to half speed. Ground
@@ -105,3 +177,46 @@ one, the ball was nearer a United player than the Arsenal receiver.
 Known weakness: ByteTrack matches by position only and swaps IDs when players
 cross during camera pans. Splitting at team changes fixes cross-team swaps, not
 swaps between teammates.
+
+## Passage search regression on the local reels
+
+Run `uv run --offline evals/passage_search.py --details` from the repository root with both
+rebuilt clip indexes present. The evaluator sends each unique query through
+FastAPI's `/api/search` route on the complete reel. Only the manually reviewed
+windows count toward the metrics. Returned clips elsewhere on the reel have
+no judgment. A positive counts when one of the first five returned spans
+has temporal intersection-over-union of at least 0.5 with the marked move.
+A negative counts when the query is supported and no returned clip touches
+that negative window. The two off-ball probes instead require an explicit
+unverified status and an explanation.
+
+The 15 `corner_cases.jsonl` judgments are the same ones used for the local
+TimeLens2 study. The first six in `passage_cases.jsonl` cover winning possession,
+progressing and shooting, wrong team, a stoppage/replay, and unsupported
+off-ball causation. On United v City, United regains the ball around 119 s,
+progresses down the right and shoots around 129 s. In Arsenal v United,
+the 532–553 s window shows an Arsenal attack, stoppage and replay. It is a
+negative for a United regain and shot.
+
+Four more judgments cover the opening Arsenal header and save, two switches
+followed by shots, and a United switch around 107 s that ends with City
+winning the ball. The shot at 254.9 s on the United v City reel was missing
+from the extracted actions. Local frame review supplied its timestamp and team.
+That positive tests retrieval from a corrected index.
+
+| Measured outcome | Result |
+|---|---:|
+| Positive queries with the reviewed passage among pre-verification candidates | 10/10 |
+| Positive queries with the reviewed passage in the top five | 10/10 |
+| Top-five hits also covering both ends of the move within two seconds | 10/10 |
+| Extra top-five copies of those hits | 0 |
+| Hard-negative windows correctly excluded | 13/13 |
+| Off-ball probes explicitly identified as unverified | 2/2 |
+
+A local in-process run of 14 distinct clip/query pairs took a median of about
+4.5 ms per request after index loading. This excludes video loading and analyst
+watch time. These are development-set regressions on two highlight reels,
+with overlapping windows, repeated plays and paraphrases. The first Arsenal
+corner and the replay include human-reviewed source corrections. The metrics
+do not measure automatic recognition of an unseen replay, precision over
+the entire reel, off-ball retrieval accuracy, or generalization to new matches.

@@ -1,9 +1,5 @@
-#!/bin/zsh
-# Launch the Situation Search server locally.
-# Reads the inference endpoint + key from a local .env (git-ignored):
-#   OPENROUTER_API_KEY=...
-#   OPENROUTER_URL=https://.../v1
+#!/bin/sh
+set -eu
 cd "$(dirname "$0")"
-[ -f .env ] && set -a && source ./.env && set +a
-export OPENROUTER_URL="${OPENROUTER_URL:-https://openrouter.ai/api/v1}"
-exec uv run --with fastapi --with uvicorn --with numpy --with openai python app/server.py
+exec uv run --no-project --with-requirements requirements.txt \
+  uvicorn app.server:app --host 127.0.0.1 --port 8008 "$@"

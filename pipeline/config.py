@@ -34,5 +34,3 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 # routes for your endpoint in .env (see .env.example).
 VIDEO_MODEL = os.environ.get("VIDEO_MODEL", "google/gemini-2.5-flash")    # vision: video + stills
 OCR_MODEL = os.environ.get("OCR_MODEL", "google/gemini-2.5-flash")        # scoreboard OCR
-EMBED_MODEL = os.environ.get("EMBED_MODEL", "openai/text-embedding-3-small")
-RERANK_MODEL = os.environ.get("RERANK_MODEL", "cohere/rerank-v3.5")

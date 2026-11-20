@@ -1,89 +1,28 @@
-"""Situation Search backend. Serves search over a vision-built match index.
-
-Everything the app knows about a match comes from vision models, processed by a
-fixed pipeline (see pipeline/): an action log of every on-ball action, a roster
-read off the shirts, goals from the scoreboard, and set pieces, switches of play
-and counter-attacks derived from the actions. No commentary, no captions.
-
-A query is answered in one of three ways:
-  1. a player's name alone   -> his reel: every snippet where he is on the ball
-  2. football vocabulary     -> structured filters on the action log (action,
-                                set piece, pattern, goal, body shape, outcome,
-                                team, player), ordered by the reranker
-  3. anything else           -> semantic search over the vision model's action
-                                descriptions, reranked; below the clip's
-                                calibrated cutoff the answer is "no match"
-"""
+"""Local search over indexed football actions and timestamped passages."""
 import json
 import os
 import re
-from collections import Counter
+from collections import defaultdict
 from pathlib import Path
 
-import httpx
-import numpy as np
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from openai import OpenAI
+from .query import FILLER, normalize, parse, vocabulary
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 STATIC = ROOT / "app" / "static"
 
-OPENROUTER_URL = os.environ.get("OPENROUTER_URL", "https://openrouter.ai/api/v1")
-OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-EMBED_MODEL = os.environ.get("EMBED_MODEL", "openai/text-embedding-3-small")
-RERANK_MODEL = os.environ.get("RERANK_MODEL", "cohere/rerank-v3.5")
-client = OpenAI(base_url=OPENROUTER_URL, api_key=OPENROUTER_KEY)
-
-NO_MATCH_THRESHOLD = float(os.environ.get("NO_MATCH_THRESHOLD", "-4.0"))  # per-clip search.json overrides
-SHOW_GAP = float(os.environ.get("SHOW_GAP", "5.0"))  # semantic results within this of the best
-RERANK_K = 40
 REEL_PAD = (3.0, 4.0)  # seconds before/after each of the player's actions (the finish lands after the touch)
 REEL_GAP_S = 2.0       # snippets closer than this merge
 
-# Query vocabulary -> structured filters. Longest phrases are matched first.
-ACTION_TERMS = {
-    "receive": ["receive", "receives", "receiving", "received", "reception", "first touch", "controls"],
-    "pass": ["pass", "passes", "passing"], "cross": ["cross", "crosses", "crossing", "crossed"],
-    "shot": ["shot", "shots", "shoot", "shoots", "shooting", "strike", "effort"],
-    "header": ["header", "headers", "headed", "heading"],
-    "dribble": ["dribble", "dribbles", "dribbling", "carry", "carries", "run with the ball"],
-    "tackle": ["tackle", "tackles", "tackling"], "interception": ["interception", "intercept", "intercepts"],
-    "clearance": ["clearance", "clearances", "clears", "cleared"],
-    "save": ["save", "saves", "diving save", "goalkeeper save"], "foul": ["foul", "fouls", "fouled"],
-    "throw_in": ["throw in", "throw-in", "throw-ins"], "goal_kick": ["goal kick", "goal kicks"],
-}
-SET_PIECE_TERMS = {"corner": ["corner", "corners", "corner kick"],
-                   "free_kick": ["free kick", "free kicks", "free-kick"], "penalty": ["penalty", "penalties"]}
-PATTERN_TERMS = {"switch_of_play": ["switch of play", "switch play", "switches of play", "switch the play"],
-                 "counter_attack": ["counter attack", "counter-attack", "counterattack", "counter attacks",
-                                    "counter-attacks", "on the break"]}
-GOAL_TERMS = ["goal", "goals", "scores", "scored", "scoring"]
-BODY_TERMS = {"half_turn": ["half turn", "half-turn", "half turned", "half-turned"],
-              "open": ["open body", "facing forward", "facing goal", "opened up"],
-              "back_to_goal": ["back to goal", "back to the goal", "with his back"]}
-OUTCOME_TERMS = {"on_target": ["on target", "on goal"], "off_target": ["off target", "wide", "misses", "missed"],
-                 "blocked": ["blocked"], "saved": ["saved"], "intercepted": ["intercepted"]}
-LED_TO = {"goal": ["led to a goal", "lead to a goal", "leading to a goal", "resulted in a goal", "scored from"],
-          "shot": ["led to a shot", "lead to a shot", "leading to a shot", "resulted in a shot"]}
-STOPWORDS = set("a an the in on of to for from by at and or with into is are that this it show me find all any "
-                "moment moments where when which who his her their ball player players team box area".split())
 NOTABLE = {"goal", "shot", "header", "save", "corner", "free_kick", "penalty", "foul"}
 
 
 def tc(s):
     return f"{int(s) // 60:02d}:{int(s) % 60:02d}"
-
-
-def phrase(ql, p):
-    return re.search(rf"(?<![a-z]){re.escape(p)}(?![a-z])", ql) is not None
-
-
-def matched(ql, table):
-    return {k for k, ps in table.items() if any(phrase(ql, p) for p in ps)}
 
 
 class Clip:
@@ -96,33 +35,24 @@ class Clip:
         self.teams = [t["name"] for t in idx["teams"]]
         self.label = " v ".join(self.teams)
         self.actions = idx["actions"]
+        self.attempt_saves = {int(shot): save for shot, save in idx["attempt_saves"].items()}
         self.by_id = {a["id"]: a for a in self.actions}
+        self.actions_by_type = defaultdict(list)
+        for a in self.actions:
+            self.actions_by_type[a["action"]].append(a)
         self.episodes, self.patterns, self.goals = idx["episodes"], idx["patterns"], idx["goals"]
         self.frames = [self.prefix + f for f in idx["frames"]]
+        self.frame_files = set(self.frames)
         self.interval = idx["frame_interval_s"]
         for a in self.actions:
             a["image"] = self.prefix + a["image"] if a.get("image") else None
         self.players = sorted({a["player"] for a in self.actions if a["player"]} |
                               {g["scorer"] for g in self.goals if g["scorer"]})
-        ep = d / "embeddings.json"
-        vecs = json.loads(ep.read_text())["vectors"] if ep.exists() else {}
-        self.emb_ids = [a["id"] for a in self.actions if str(a["id"]) in vecs]
-        m = np.array([vecs[str(i)] for i in self.emb_ids], dtype=np.float32).reshape(len(self.emb_ids), -1)
-        self.emb = m / np.clip(np.linalg.norm(m, axis=1, keepdims=True), 1e-9, None) if len(m) else m
-        sp = d / "search.json"
-        self.no_match = json.loads(sp.read_text())["no_match_threshold"] if sp.exists() else NO_MATCH_THRESHOLD
+        self.lexicon = vocabulary(self.teams, set(idx["roster"].values()) | set(self.players))
+        self.descriptions = [(a, set(normalize(action_text(a)).split())) for a in self.actions]
 
     def image_at(self, t):
         return self.frames[min(max(int(t // self.interval), 0), len(self.frames) - 1)] if self.frames else None
-
-    def player_in(self, ql):
-        for p in self.players:
-            if p.lower() in ql or any(len(w) >= 4 and phrase(ql, w.lower()) for w in p.split()):
-                return p
-        return None
-
-    def team_in(self, ql):
-        return next((t for t in self.teams if phrase(ql, t.lower())), None)
 
     def reel(self, player):
         ts = sorted({a["t"] for a in self.actions if a["player"] == player} |
@@ -137,14 +67,8 @@ class Clip:
         return segs
 
 
-CLIPS = {p.parent.name: Clip(p.parent.name) for p in sorted((DATA / "clips").glob("*/index.json"))
-         if "actions" in json.loads(p.read_text())}
-CLIP_ORDER = sorted(CLIPS, key=lambda n: CLIPS[n].label)
-DEFAULT_CLIP = os.environ.get("DEFAULT_CLIP") or (CLIP_ORDER[0] if CLIP_ORDER else None)
-
-
 def get_clip(name):
-    c = CLIPS.get(name) or CLIPS.get(DEFAULT_CLIP)
+    c = CLIPS.get(name or DEFAULT_CLIP)
     if c is None:
         raise HTTPException(404, "No clip index loaded")
     return c
@@ -158,16 +82,17 @@ def action_text(a):
     return f"{a['action'].replace('_', ' ')} by {who(a)}. {a['detail']}"
 
 
-def action_row(c, a, rel=None):
+def action_row(c, a):
     extra = []
     if a["action"] == "receive" and a.get("body_shape") not in (None, "unclear"):
         extra.append(a["body_shape"].replace("_", "-"))
     if a.get("outcome") not in (None, "none"):
         extra.append(a["outcome"].replace("_", " "))
-    return {"t_seconds": a["t"], "timecode": a["timecode"], "event": a["action"], "image": a["image"],
+    return {"episode_end": min(c.duration, a["t"] + (3.5 if a["action"] == "cross" else 2)),
+            "evidence": [{"t": a["t"], "detail": a["detail"]}], "t_seconds": a["t"], "timecode": a["timecode"], "event": a["action"], "image": a["image"],
             "prose": f"{who(a)}{' (' + ', '.join(extra) + ')' if extra else ''}. {a['detail']}",
             "players": [a["player"]] if a["player"] else [], "identity_source": a["identity_source"],
-            "relevance": rel}
+            "relevance": None}
 
 
 def span_row(c, kind, start, end, prose, outcome=None, scorer=None):
@@ -175,119 +100,345 @@ def span_row(c, kind, start, end, prose, outcome=None, scorer=None):
             "image": c.image_at(start + 2), "prose": prose, "scorer": scorer}
 
 
-def rerank(query, docs):
-    r = httpx.post(f"{OPENROUTER_URL}/rerank", headers={"Authorization": f"Bearer {OPENROUTER_KEY}"},
-                   json={"model": RERANK_MODEL, "query": query, "documents": docs, "top_n": len(docs)}, timeout=20)
-    r.raise_for_status()
-    return {x["index"]: float(x["relevance_score"]) for x in r.json()["results"]}
+def respond(results, ranking, **fields):
+    status = fields.pop("status", "verified")
+    return {"results": results, "ranking": ranking, "count": len(results), "status": status,
+            "no_match": status == "verified" and not results, **fields}
 
 
-def order(q, rows, texts):
-    """Order structured hits by reranker relevance; keep time order if it is down."""
-    if len(rows) < 2:
-        return rows
-    try:
-        rs = rerank(q, texts)
-        return [rows[i] for i in sorted(range(len(rows)), key=lambda i: -rs.get(i, -1e9))]
-    except Exception:
-        return rows
+def verified(rows, ranking, candidate_spans):
+    return respond(rows, ranking, candidate_spans=candidate_spans)
 
 
-def semantic(c, q):
-    """Best-first [(score, action)] over the vision descriptions; raises if the endpoint is down."""
-    if not len(c.emb):
-        return []
-    r = client.embeddings.create(model=EMBED_MODEL, input=[q], encoding_format="float",
-                                 extra_body={"input_type": "query"})
-    qv = np.array(r.data[0].embedding, dtype=np.float32)
-    sims = c.emb @ (qv / max(np.linalg.norm(qv), 1e-9))
-    cand = [c.by_id[c.emb_ids[i]] for i in np.argsort(-sims)[:RERANK_K]]
-    rs = rerank(q, [action_text(a) for a in cand])
-    return sorted(((rs.get(i, -1e9), a) for i, a in enumerate(cand)), key=lambda x: -x[0])
+def suggestions(c, q, plan, reason):
+    # Description hits are reading aids. They never become verified matches.
+    terms = set(plan.unknown or normalize(q).split()) - FILLER
+    player = plan.one("player")
+    team = plan.one("team")
+    rows = []
+    if terms:
+        for action, words in c.descriptions:
+            if terms <= words and (not team or team == action["team"]) and (not player or player == action["player"]):
+                rows.append(action_row(c, action))
+    return respond(rows, "description candidates", status="unverified", message=reason)
 
 
-def respond(results, ranking, **kw):
-    return JSONResponse({"results": results, "ranking": ranking, "count": len(results),
-                         "no_match": not results, **kw})
+def player_reel(c, player):
+    segs = c.reel(player)
+    rows = []
+    for start, end in segs:
+        actions = [a for a in c.actions if a["player"] == player and start <= a["t"] <= end]
+        prose = " ".join(action_text(a) for a in actions[:3]) or f"{player} scores."
+        row = span_row(c, actions[0]["action"] if actions else "goal", start, min(end, c.duration), prose)
+        row["evidence"] = [{"t": a["t"], "detail": action_text(a)} for a in actions]
+        rows.append(row)
+    return respond(rows, "reel", player=player, reel=segs)
+
+
+def matches_fields(a, plan):
+    for key in ("pressure", "length", "shape", "origin", "destination", "style"):
+        value = plan.one(key)
+        if not value:
+            continue
+        if key == "style" and not re.search(r"\bdiv(?:e|es|ed|ing)\b", a["detail"], re.I):
+            return False
+        if key == "shape" and a.get("body_shape") != value:
+            return False
+        if key == "length" and a.get("length") != value:
+            return False
+        if key == "pressure":
+            pressures = {"tight", "light"} if value == "any" else {value}
+            if a.get("pressure") not in pressures:
+                return False
+        start, end = a.get("start") or {}, a.get("end") or {}
+        if key == "origin" and start.get("side") != value:
+            return False
+        if key == "destination":
+            if value in {"box", "opposite_box"} and not re.search(
+                    r"penalty (area|box)|six.yard|into the box|(?:near|far|back) post", a["detail"], re.I):
+                return False
+            if value == "opposite_box":
+                if {start.get("side"), end.get("side")} != {"left", "right"} or end.get("third") != "att":
+                    return False
+            elif value != "box" and end.get("side") != value:
+                return False
+    return True
+
+
+def outcome_matches(actual, wanted, negate=False, has_shot=False):
+    if not wanted:
+        return True
+    if not actual or actual in {"unknown", "none", "unclear"}:
+        return False
+    if wanted == "shot":
+        match = has_shot
+    elif wanted == "on_target":
+        match = actual in {"save", "saved", "on_target", "goal"}
+    elif wanted == "saved":
+        match = actual in {"save", "saved"}
+    else:
+        match = actual == wanted
+    return not match if negate else match
+
+
+def step_matches(e, step):
+    if step in {"regain", "progression"}:
+        return e.get("stage") == step
+    if step == "shot":
+        return e.get("stage") == "shot" or e.get("action") == "shot"
+    return e.get("action") == step
+
+
+def passage_observations(c, passage):
+    observations = list(passage["evidence"])
+    represented = {e.get("action_id") for e in observations}
+    for action_id in passage["action_ids"]:
+        if action_id not in represented:
+            a = c.by_id[action_id]
+            observations.append(dict(action_id=a["id"], **{k: a[k] for k in ("t", "action", "detail", "team", "player")}))
+    return sorted(observations, key=lambda e: e["t"])
+
+
+def step_witnesses(observations, team, steps, step_players, attempt_saves):
+    # Select a linked pair together so an earlier, unrelated header cannot hide it.
+    witnesses = []
+    for i, step in enumerate(steps):
+        last = witnesses[-1] if witnesses else None
+        needs_save = step in {"header", "shot"} and steps[i+1:i+2] == ["save"]
+        linked_to = (attempt_saves[last["action_id"]] if i and step == "save"
+                     and steps[i-1] in {"header", "shot"} else None)
+        witness = next((e for e in observations if (not last or e["t"] > last["t"])
+                        and step_matches(e, step)
+                        and (not needs_save or e.get("action_id") in attempt_saves)
+                        and (linked_to is None or e.get("action_id") == linked_to)
+                        and (step not in step_players or e.get("player") == step_players[step])
+                        and (e.get("team") == team if step != "save" else e.get("team") and e["team"] != team)), None)
+        if witness is None:
+            return None
+        witnesses.append(witness)
+    return witnesses
+
+
+def passage_search(c, q, plan):
+    pattern, piece, steps = plan.one("pattern"), plan.one("piece"), plan.values("step")
+    if pattern and piece:
+        return suggestions(c, q, plan, "The index cannot verify a relationship between these two passages.")
+    if piece:
+        candidates = [p for p in c.episodes if piece in (p["type"], "set_piece")]
+    elif pattern:
+        candidates = [p for p in c.patterns if p["type"] == pattern]
+    else:
+        candidates = [p for p in c.patterns if p["type"] in {"regain_attack", "counter_attack"}]
+    team, wanted = plan.one("team"), plan.one("result")
+    rel = plan.values("relation")
+    delivery_fields = any(plan.one(k) for k in ("shape", "pressure", "length", "origin", "destination", "style"))
+    if "open_play" in rel or (delivery_fields and (not piece or steps or wanted)):
+        return suggestions(c, q, plan, "The requested passage modifier needs additional evidence.")
+    negate = "neg" in rel
+    if negate:
+        pos = plan.tags.index(("relation", "neg"))
+        if any(k == "result" for k, _ in plan.tags[:pos]):
+            return suggestions(c, q, plan, "The combination of a required outcome and a separate exclusion needs more evidence.")
+        # Only an explicitly scoped terminal exclusion is supported.
+        excluded = [(k, v) for k, v in plan.tags[pos+1:] if k in ("step", "result", "piece", "pattern", "player", "team", "saving_team")]
+        if len(excluded) != 1 or excluded[0][0] not in ("step", "result") or excluded[0][1] not in ("goal", "shot", "save", "saved"):
+            return suggestions(c, q, plan, "The scope of this exclusion could not be verified.")
+        _, wanted = excluded[0]
+        if wanted in steps:
+            steps = steps.copy()
+            steps.remove(wanted)
+        wanted = "saved" if wanted == "save" else wanted
+    ordered = [(k, v) for k, v in plan.tags if k in ("piece", "pattern", "step", "result", "relation")]
+    # A shot after a regain reverses surface order. Normalize binary 'after'.
+    if ("relation", "after") in ordered:
+        split = ordered.index(("relation", "after"))
+        ordered = ordered[split+1:] + ordered[:split]
+    stages = [(k, v) for k, v in ordered if k in ("piece", "pattern", "step", "result")]
+    if stages and (piece or pattern) and stages[0][0] not in ("piece", "pattern"):
+        return suggestions(c, q, plan, "The requested ordering does not start with the selected passage.")
+    if not piece and not pattern and ("step", "regain") in stages and stages[0] != ("step", "regain"):
+        return suggestions(c, q, plan, "The indexed passage begins at the regain. Earlier actions need separate verification.")
+    if not negate:
+        steps = [v for k, v in stages if k == "step"]
+        if stages[-1:] == [("step", "save")] and "terminal" in rel:
+            wanted = "saved"
+        if ("result", wanted) in stages and any(k == "step" for k, v in stages[stages.index(("result", wanted))+1:]):
+            return suggestions(c, q, plan, "The requested events after the outcome need separate verification.")
+    rows = []
+    for p in candidates:
+        if team and p["team"] != team:
+            continue
+        if delivery_fields and not matches_fields(c.by_id[p["action_ids"][0]], plan):
+            continue
+        observations = passage_observations(c, p)
+        if plan.one("saving_team") and not any(e["action"] == "save" and e.get("team") == plan.one("saving_team")
+                                               and e["team"] != p["team"] for e in observations):
+            continue
+        roles = {"taker": p.get("taker"), "shooter": p.get("shooter"), "scorer": p.get("scorer")}
+        actors = {e.get("player") for e in observations if e.get("team") == p["team"]}
+        keepers = {e.get("player") for e in observations if e["action"] == "save" and e.get("team") != p["team"]}
+        participants = {role: {name} for role, name in roles.items()}
+        participants.update(actor=actors, keeper=keepers)
+        if any(name not in participants[role] for role, name in plan.role_players.items()):
+            continue
+        witnesses = step_witnesses(observations, p["team"], steps, plan.step_players, c.attempt_saves)
+        if witnesses is None:
+            continue
+        has_shot = any(step_matches(e, "shot") and e.get("team") == p["team"] for e in observations)
+        outcome = p.get("outcome")
+        if outcome == "shot" and wanted in {"on_target", "off_target", "blocked"}:
+            shot = next((e for e in p["evidence"] if e.get("stage") == "shot"), None)
+            outcome = c.by_id[shot["action_id"]]["outcome"] if shot else None
+        if negate and wanted == "saved" and "terminal" not in rel:
+            if any(e["action"] == "save" and e.get("team") != p["team"] for e in observations):
+                continue
+        if not outcome_matches(outcome, wanted, negate, has_shot):
+            continue
+        row = span_row(c, p["type"], p["start"], p["end"], f"{p['team']} {p['type'].replace('_', ' ')}.",
+                       outcome=p.get("outcome"), scorer=p.get("scorer"))
+        row["evidence"] = sorted(p["evidence"] + [e for e in witnesses if e not in p["evidence"]], key=lambda e: e["t"])
+        rows.append(row)
+    return verified(rows, "passages", [[p["start"], p["end"]] for p in candidates])
+
+
+def goal_search(c, q, plan):
+    if any(role != "scorer" and role != "actor" for role in plan.role_players) or plan.values("step") or any(plan.one(k) for k in ("shape", "length", "pressure", "origin", "destination", "style")):
+        return suggestions(c, q, plan, "The requested goal conditions need additional evidence.")
+    team, player = plan.one("team"), plan.one("player")
+    rows, candidates = [], []
+    for g in c.goals:
+        start, end = max(g["t"]-8, 0), min(g["t"]+4, c.duration)
+        candidates.append([start, end])
+        if team and g["team"] != team or player and g["scorer"] != player:
+            continue
+        if "open_play" in plan.values("relation"):
+            # Verify a same-team on-ball build-up near the strike. Exclude linked restarts.
+            if any(p["team"] == g["team"] and p["start"] <= g["t"] <= p["end"] for p in c.episodes):
+                continue
+            recent = [a for a in c.actions if start <= a["t"] < g["t"]]
+            if not any(a["team"] == g["team"] and a["action"] in {"pass","dribble","receive"} for a in recent):
+                continue
+        action = c.by_id.get(g["action_id"])
+        prose = f"{g['team']} goal" + (f" by {g['scorer']}." if g["scorer"] else ".")
+        row = span_row(c, "goal", start, end, prose, "goal", g["scorer"])
+        row["evidence"] = [{"t": g["t"], "detail": action_text(action) if action else prose}]
+        if g.get("scoreboard_t") is not None:
+            row["evidence"].append({"t": g["scoreboard_t"], "detail": "The scoreboard records the goal."})
+        rows.append(row)
+    return verified(rows, "goals", candidates)
+
+
+def linked_save_search(c, plan, attempt):
+    rows, candidates = [], []
+    for shot_id, save_id in c.attempt_saves.items():
+        shot, save = c.by_id[shot_id], c.by_id[save_id]
+        if attempt == "header" and shot["action"] != "header":
+            continue
+        start, end = max(0, shot["t"] - 2), min(c.duration, save["t"] + 2)
+        candidates.append([start, end])
+        shooter = (plan.role_players.get("shooter") or plan.step_players.get(attempt)
+                   or plan.role_players.get("actor"))
+        if ((plan.one("team") and plan.one("team") != shot["team"]) or
+                (plan.one("saving_team") and plan.one("saving_team") != save["team"]) or
+                (shooter and shooter != shot["player"]) or
+                (plan.role_players.get("keeper") and plan.role_players["keeper"] != save["player"])):
+            continue
+        row = span_row(c, "sequence", start, end, f'{save["team"]} saved the {shot["team"]} {shot["action"]}.',
+                       outcome="save")
+        row["evidence"] = [{k: a[k] for k in ("t", "detail", "team", "action", "player")}
+                           for a in (shot, save)]
+        rows.append(row)
+    return verified(rows, "sequence", candidates)
+
+
+def action_search(c, q, plan):
+    steps = plan.values("step") or ["receive"]
+    wanted = plan.one("result")
+    team, player = plan.one("team"), plan.one("player")
+    ordered = steps[::-1] if "after" in plan.values("relation") else steps
+    saved_attempt = (ordered in (["header"], ["shot"]) and wanted == "saved") or (
+        ordered in (["header", "save"], ["shot", "save"]) and not wanted)
+    if saved_attempt:
+        if any(plan.one(k) for k in ("shape", "length", "pressure", "origin", "destination", "style")):
+            return suggestions(c, q, plan, "The requested modifiers need separate verification.")
+        return linked_save_search(c, plan, ordered[0])
+    if len(steps) > 1:
+        if not plan.one("relation") or len(steps) != 2 or wanted or any(plan.one(k) for k in ("shape","length","pressure","origin","destination","style")):
+            return suggestions(c, q, plan, "The requested action sequence needs additional evidence.")
+        if "after" in plan.values("relation"):
+            steps = steps[::-1]
+        required_players = dict(plan.step_players)
+        if "shooter" in plan.role_players:
+            required_players["shot"] = plan.role_players["shooter"]
+        if "keeper" in plan.role_players:
+            required_players["save"] = plan.role_players["keeper"]
+        if plan.one("saving_team"):
+            return suggestions(c, q, plan, "The saving team needs an attempt linked to its save.")
+        rows, candidates = [], []
+        for a, b in zip(c.actions, c.actions[1:]):
+            if a["action"] != steps[0] or b["action"] != steps[1] or not 0 < b["t"]-a["t"] <= 4:
+                continue
+            candidates.append([a["t"], b["t"] + 1])
+            if not a["team"] or not b["team"] or team and team != a["team"]:
+                continue
+            if a["team"] != b["team"]:
+                continue
+            if any(required_players[s] != x["player"] for s, x in zip(steps, (a, b)) if s in required_players):
+                continue
+            if plan.role_players.get("actor") and not all(x["player"] == plan.role_players["actor"] for x in (a,b)):
+                continue
+            if steps[0] == "receive" and not ((a["player"] and a["player"] == b["player"]) or
+                                               (a.get("track") and a["track"] == b.get("track"))):
+                continue
+            row = span_row(c, "sequence", a["t"], min(c.duration,b["t"]+1), f"{steps[0]} then {steps[1]}.")
+            row["evidence"] = [{"t": x["t"], "detail": action_text(x)} for x in (a,b)]
+            rows.append(row)
+        return verified(rows, "sequence", candidates)
+    rows, candidates = [], []
+    previous = None
+    for a in c.actions_by_type.get(steps[0], []):
+        row = action_row(c, a)
+        candidates.append([row["t_seconds"],row["episode_end"]])
+        if team and a["team"] != team or player and a["player"] != player:
+            continue
+        if not matches_fields(a, plan) or not outcome_matches(a["outcome"], wanted):
+            continue
+        # The model sometimes describes one delivery twice in overlapping views.
+        if previous and a["action"] == "cross" and 0 <= a["t"] - previous["t"] <= 1.5 and all(
+                a[k] == previous[k] for k in ("team", "player", "start", "end")):
+            continue
+        rows.append(row)
+        previous = a
+    return verified(rows, "actions", candidates)
 
 
 def search_clip(c, q):
-    ql = q.lower().strip()
-    player, team = c.player_in(ql), c.team_in(ql)
-    words = [w for w in re.findall(r"[a-z'-]+", ql) if w not in STOPWORDS]
+    plan = parse(q, c.lexicon)
+    if plan.problem or plan.unknown:
+        reason = plan.problem or "The index cannot verify: " + ", ".join(dict.fromkeys(plan.unknown)) + "."
+        return suggestions(c, q, plan, reason)
+    if len(plan.tags) == 1 and plan.one("player"):
+        return player_reel(c, plan.one("player"))
+    if plan.one("piece") or plan.one("pattern") or "regain" in plan.values("step"):
+        return passage_search(c, q, plan)
+    if "neg" in plan.values("relation"):
+        return suggestions(c, q, plan, "This exclusion needs a passage with an established outcome.")
+    if plan.one("result") == "goal" and not plan.one("step"):
+        return goal_search(c, q, plan)
+    action_roles = {"shooter", "keeper"}
+    if "open_play" in plan.values("relation") or set(plan.values("role")) - action_roles:
+        return suggestions(c, q, plan, "The roles or phase of play could not be verified.")
+    if plan.one("step") or plan.one("shape") or plan.one("result") == "saved":
+        if plan.one("result") == "saved" and not plan.one("step"):
+            plan.tags.append(("step", "shot"))
+        return action_search(c, q, plan)
+    return suggestions(c, q, plan, "No structured situation was recognized. These are possible description matches.")
 
-    # 1. a name alone: the player's reel. Shirts carry surnames, so one extra word
-    # (a first name: "Kobbie Mainoo") is allowed.
-    vocab = (ACTION_TERMS, SET_PIECE_TERMS, PATTERN_TERMS, BODY_TERMS, OUTCOME_TERMS, LED_TO)
-    others = [w for w in words if w not in player.lower().split()] if player else []
-    if player and len(others) <= 1 and not any(matched(ql, t) for t in vocab) \
-            and not any(phrase(ql, g) for g in GOAL_TERMS):
-        segs = c.reel(player)
-        rows = []
-        for s, e in segs:
-            acts = [a for a in c.actions if a["player"] == player and s <= a["t"] <= e]
-            prose = " ".join(action_text(a) for a in acts[:3]) or f"{player} scores."
-            rows.append(span_row(c, acts[0]["action"] if acts else "goal", s, e, prose))
-        return respond(rows, "reel", reel=segs, player=player)
 
-    sp, pat = matched(ql, SET_PIECE_TERMS), matched(ql, PATTERN_TERMS)
-    acts, led = matched(ql, ACTION_TERMS), matched(ql, LED_TO)
-    shapes, outcomes = matched(ql, BODY_TERMS), matched(ql, OUTCOME_TERMS)
-    wants_goal = any(phrase(ql, g) for g in GOAL_TERMS) and not led and "goal_kick" not in acts \
-        and not phrase(ql, "on goal")  # "shot on goal" = on target, not scored
-
-    # 2a. set pieces as episodes, optionally filtered on what they led to
-    if sp:
-        eps = [e for e in c.episodes if e["type"] in sp and (not team or e["team"] == team)
-               and (not led or e["outcome"] in led) and (not player or e["taker"] == player)]
-        rows = [span_row(c, e["type"], e["start"], e["end"],
-                         " ".join(action_text(c.by_id[i]) for i in e["action_ids"][:3]), e["outcome"])
-                for e in eps]
-        return respond(order(q, rows, [r["prose"] for r in rows]), "set pieces")
-
-    # 2b. derived patterns
-    if pat:
-        ps = [p for p in c.patterns if p["type"] in pat and (not team or p["team"] == team)
-              and (not player or any(c.by_id[i]["player"] == player for i in p["action_ids"]))]
-        rows = [span_row(c, p["type"], p["start"], p["end"],
-                         " ".join(action_text(c.by_id[i]) for i in p["action_ids"][:3])) for p in ps]
-        return respond(order(q, rows, [r["prose"] for r in rows]), "patterns")
-
-    # 2c. goals from the scoreboard
-    if wants_goal and not acts:
-        gs = [g for g in c.goals if (not team or g["team"] == team) and (not player or g["scorer"] == player)]
-        rows = [span_row(c, "goal", max(g["t"] - 8, 0), g["t"] + 4,
-                         f"{g['team']} goal" + (f" by {g['scorer']}. " if g["scorer"] else ". ") +
-                         (action_text(c.by_id[g["action_id"]]) if g["action_id"] is not None else ""),
-                         scorer=g["scorer"]) for g in gs]
-        return respond(rows, "goals")
-
-    # 2d. actions with modifiers
-    if acts or shapes:
-        if shapes:
-            acts = acts | {"receive"}
-        if wants_goal:
-            outcomes = outcomes | {"goal"}
-        if "on_target" in outcomes:  # a shot on target is saved, scores, or is logged as on target
-            outcomes = outcomes | {"saved", "goal"}
-        hits = [a for a in c.actions if a["action"] in acts and (not team or a["team"] == team)
-                and (not player or a["player"] == player)
-                and (not shapes or a.get("body_shape") in shapes)
-                and (not outcomes or a.get("outcome") in outcomes)]
-        rows = order(q, [action_row(c, a) for a in hits], [action_text(a) for a in hits])
-        return respond(rows, "actions")
-
-    # 3. free text (a named player or team still filters) over the vision descriptions
-    try:
-        ranked = semantic(c, q)
-    except Exception:
-        return respond([], "unavailable", error="search endpoint unreachable")
-    if not ranked or ranked[0][0] < c.no_match:
-        return respond([], "semantic")
-    cutoff = max(c.no_match, ranked[0][0] - SHOW_GAP)
-    rows = [action_row(c, a, s) for s, a in ranked if s >= cutoff and (not player or a["player"] == player)
-            and (not team or a["team"] == team)]
-    return respond(rows, "semantic")
+CLIPS = {p.parent.name: Clip(p.parent.name) for p in sorted((DATA / "clips").glob("*/index.json"))
+         if "actions" in json.loads(p.read_text())}
+CLIP_ORDER = sorted(CLIPS, key=lambda n: CLIPS[n].label)
+DEFAULT_CLIP = os.environ.get("DEFAULT_CLIP") or (CLIP_ORDER[0] if CLIP_ORDER else None)
 
 
 app = FastAPI(title="Situation Search")
@@ -313,9 +464,10 @@ def timeline(clip: str = ""):
           for a in c.actions if a["action"] in NOTABLE and a["action"] != "goal"]
     ev += [{"t_seconds": g["t"], "timecode": tc(g["t"]), "type": "goal", "key_player": g["scorer"] or g["team"],
             "detail": f"{g['team']} goal" + (f" by {g['scorer']}" if g["scorer"] else ""),
-            "confidence": 1.0, "image": c.image_at(g["t"]), "scorebug_corroborated": True} for g in c.goals]
+            "confidence": 1.0 if g["scoreboard_t"] is not None else c.by_id[g["action_id"]]["confidence"],
+            "image": c.image_at(g["t"]), "scorebug_corroborated": g["scoreboard_t"] is not None} for g in c.goals]
     ev.sort(key=lambda e: e["t_seconds"])
-    return JSONResponse({"events": ev, "duration": c.duration, "confirmed_goals": len(c.goals)})
+    return JSONResponse({"events": ev, "duration": c.duration, "confirmed_goals": sum(g["scoreboard_t"] is not None for g in c.goals)})
 
 
 @app.get("/api/players")
@@ -335,18 +487,27 @@ def players(clip: str = ""):
 @app.get("/api/player")
 def player(name: str, clip: str = ""):
     c = get_clip(clip)
-    res = json.loads(search_clip(c, name).body)
+    res = search_clip(c, name)
     st = next((p for p in json.loads(players(clip).body)["players"] if p["name"] == res.get("player")), {})
     return JSONResponse({"name": res.get("player") or name, "stats": st, "moments": res["results"],
                          "reel": res.get("reel", [])})
 
 
+@app.get("/api/visual-search")
+def visual_search(q: str, clip: str = ""):
+    from .visual import visual_candidates
+    return visual_candidates(get_clip(clip), q)
+
+
 @app.get("/api/search")
-def search(q: str = "", clip: str = ""):
+def search(q: str = "", clip: str = "", diagnostics: bool = False):
     c = get_clip(clip)
     if not q.strip():
         return respond([action_row(c, a) for a in c.actions if a["action"] in NOTABLE], "browse")
-    return search_clip(c, q)
+    result = search_clip(c, q)
+    if not diagnostics:
+        result.pop("candidate_spans", None)
+    return JSONResponse(result)
 
 
 @app.get("/")
@@ -354,7 +515,16 @@ def index():
     return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
 
 
-app.mount("/media/clips", StaticFiles(directory=DATA / "clips", check_dir=False), name="media")
+@app.get("/media/clips/{clip}/{asset:path}")
+def clip_media(clip: str, asset: str):
+    c = get_clip(clip)
+    relative = c.prefix + asset
+    if relative != c.video and relative not in c.frame_files:
+        raise HTTPException(404, "Unknown media file")
+    return FileResponse(DATA / relative)
+
+
+
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 if __name__ == "__main__":
